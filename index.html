@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Zelothorn</title>
+</head>
+<body style="font-family: Arial; text-align:center; margin-top:100px;">
+
+  <h1>Zelothorn</h1>
+
+  <input id="ticker" placeholder="Enter ticker (AAPL, TSLA)" />
+
+  <button onclick="getReport()">Get Report</button>
+
+  <pre id="output" style="margin-top:30px;"></pre>
+
+  <script>
+async function getReport() {
+  const ticker = document.getElementById("ticker").value;
+
+  const res = await fetch(`https://zelothorn-api.onrender.com/resolve?ticker=${ticker}`);
+  const data = await res.json();
+
+  console.log(data);
+
+  document.getElementById("output").innerText =
+    JSON.stringify(data, null, 2);
+}
+</script>
+
+</body>
+</html>
