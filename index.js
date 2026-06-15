@@ -1,11 +1,27 @@
 const express = require("express");
 const cors = require("cors");
+const path = require("path");
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 
+/* =========================
+   OPTION A: Serve frontend
+   ========================= */
+
+// THIS IS THE KEY ADDITION
+app.use(express.static(path.join(__dirname, "public")));
+
+// If someone visits root, show index.html
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
+/* =========================
+   SEC FILINGS LOGIC
+   ========================= */
 
 // helper: fetch latest SEC filing
 async function getFilings(cik) {
@@ -34,7 +50,10 @@ async function getFilings(cik) {
   return filings;
 }
 
-// main endpoint
+/* =========================
+   MAIN ENDPOINT
+   ========================= */
+
 app.get("/resolve", async (req, res) => {
   const ticker = req.query.ticker;
 
@@ -74,6 +93,11 @@ app.get("/resolve", async (req, res) => {
     });
   }
 });
+
+/* =========================
+   START SERVER
+   ========================= */
+
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
