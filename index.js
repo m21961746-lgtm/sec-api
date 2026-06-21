@@ -8,52 +8,93 @@ app.use(cors());
 app.use(express.json());
 
 /* =========================
-   OPTION A: Serve frontend
+   SERVE THE FRONTEND
    ========================= */
-
-// THIS IS THE KEY ADDITION
 app.use(express.static(path.join(__dirname, "public")));
 
-// If someone visits root, show index.html
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
 /* =========================
-   SEC FILINGS LOGIC
+   SEC REQUEST SETTINGS
+   SEC asks that requests identify who is sending them.
+   (You can drop a contact email in here later if you want.)
    ========================= */
+const SEC_HEADERS = {
+  "User-Agent": "Zelothorn (https://zelothorn-api.onrender.com)"
+};
 
-// helper: fetch latest SEC filing
-async function getFilings(cik) {
-  const url = `https://data.sec.gov/submissions/CIK${cik}.json`;
+/* ===================================================
+   DYNAMIC TICKER -> CIK LOOKUP  (the big upgrade)
+   Loads SEC's full company list once, keeps it in
+   memory, and refreshes it at most once per day.
+   This is what unlocks the whole US market.
+   =================================================== */
+let tickerMap = null;          // e.g. { AAPL: { cik: "0000320193", title: "Apple Inc." } }
+let tickerMapLoadedAt = 0;
+const ONE_DAY = 24 * 60 * 60 * 1000;
 
-  const res = await fetch(url, {
-    headers: {
-      "User-Agent": "Mozilla/5.0"
-    }
+async function loadTickerMap() {
+  // Reuse the cached list unless it's missing or more than a day old
+  if (tickerMap && Date.now() - tickerMapLoadedAt < ONE_DAY) {
+    return tickerMap;
+  }
+
+  const res = await fetch("https://www.sec.gov/files/company_tickers.json", {
+    headers: SEC_HEADERS
   });
+
+  if (!res.ok) {
+    throw new Error(`SEC ticker list request failed (status ${res.status})`);
+  }
 
   const data = await res.json();
 
+  const map = {};
+  for (const key in data) {
+    const row = data[key];
+    const ticker = String(row.ticker).toUpperCase();
+    const cik = String(row.cik_str).padStart(10, "0");
+    map[ticker] = { cik, title: row.title };
+  }
+
+  tickerMap = map;
+  tickerMapLoadedAt = Date.now();
+  return tickerMap;
+}
+
+/* =========================
+   FETCH LATEST SEC FILINGS
+   ========================= */
+async function getFilings(cik) {
+  const url = `https://data.sec.gov/submissions/CIK${cik}.json`;
+
+  const res = await fetch(url, { headers: SEC_HEADERS });
+
+  if (!res.ok) {
+    throw new Error(`SEC filings request failed (status ${res.status})`);
+  }
+
+  const data = await res.json();
   const recent = data.filings.recent;
 
-  let filings = [];
-
-  for (let i = 0; i < 10; i++) {
+  const filings = [];
+  const count = Math.min(10, recent.form.length);
+  for (let i = 0; i < count; i++) {
     filings.push({
       form: recent.form[i],
       filingDate: recent.filingDate[i],
       accessionNumber: recent.accessionNumber[i]
     });
   }
-
   return filings;
 }
 
 /* =========================
-   MAIN ENDPOINT
+   MAIN ENDPOINT:  /resolve?ticker=XXXX
+   Works for ANY US-listed ticker now, not just the old 4.
    ========================= */
-
 app.get("/resolve", async (req, res) => {
   const ticker = req.query.ticker;
 
@@ -61,31 +102,25 @@ app.get("/resolve", async (req, res) => {
     return res.status(400).json({ error: "Missing ticker" });
   }
 
-  const cikMap = {
-    AAPL: "0000320193",
-    MSFT: "0000789019",
-    TSLA: "0001318605",
-    NVDA: "0001045810"
-  };
-
-  const cik = cikMap[ticker.toUpperCase()];
-
-  if (!cik) {
-    return res.status(404).json({ error: "CIK not found" });
-  }
-
-  const padded = cik.padStart(10, "0");
-
   try {
-    const filings = await getFilings(padded);
+    const map = await loadTickerMap();
+    const entry = map[ticker.toUpperCase()];
+
+    if (!entry) {
+      return res.status(404).json({
+        error: `Ticker '${ticker.toUpperCase()}' not found in SEC's company list.`
+      });
+    }
+
+    const filings = await getFilings(entry.cik);
 
     res.json({
       ticker: ticker.toUpperCase(),
-      cik: padded,
-      sec_url: `https://data.sec.gov/submissions/CIK${padded}.json`,
+      company: entry.title,
+      cik: entry.cik,
+      sec_url: `https://data.sec.gov/submissions/CIK${entry.cik}.json`,
       filings: filings
     });
-
   } catch (err) {
     res.status(500).json({
       error: "Failed to fetch SEC data",
@@ -97,7 +132,6 @@ app.get("/resolve", async (req, res) => {
 /* =========================
    START SERVER
    ========================= */
-
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
