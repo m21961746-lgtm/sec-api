@@ -25,8 +25,16 @@ const SEC_HEADERS = {
   "User-Agent": "Zelothorn (https://zelothorn-api.onrender.com)"
 };
 
+/* =========================
+   AI MODEL SETTINGS (Phase 1)
+   The model that writes the plain-language summary.
+   gpt-5.4-mini is fast + cheap. You can change this name
+   later if you ever want a smarter (pricier) model.
+   ========================= */
+const OPENAI_MODEL = "gpt-5.4-mini";
+
 /* ===================================================
-   DYNAMIC TICKER -> CIK LOOKUP  (the big upgrade)
+   DYNAMIC TICKER -> CIK LOOKUP
    Loads SEC's full company list once, keeps it in
    memory, and refreshes it at most once per day.
    This is what unlocks the whole US market.
@@ -36,7 +44,6 @@ let tickerMapLoadedAt = 0;
 const ONE_DAY = 24 * 60 * 60 * 1000;
 
 async function loadTickerMap() {
-  // Reuse the cached list unless it's missing or more than a day old
   if (tickerMap && Date.now() - tickerMapLoadedAt < ONE_DAY) {
     return tickerMap;
   }
@@ -91,9 +98,76 @@ async function getFilings(cik) {
   return filings;
 }
 
+/* ===================================================
+   PHASE 1: AI SUMMARY
+   Sends the company + its recent filings to OpenAI and
+   asks for a plain-language explanation of the business.
+   =================================================== */
+async function generateSummary(company, ticker, filings) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error("OPENAI_API_KEY is not set on the server");
+  }
+
+  const filingLines = filings
+    .map(f => `- ${f.form} filed ${f.filingDate}`)
+    .join("\n");
+
+  const userPrompt =
+    `Company: ${company} (ticker ${ticker}).\n` +
+    `Recent SEC filings:\n${filingLines}\n\n` +
+    `Write a clear, plain-language summary for a regular person who may not ` +
+    `know much about finance. Explain what this company is, what it actually ` +
+    `does to make money, and give a high-level overview of its operations. ` +
+    `Use 2-3 short paragraphs. Do NOT give any buy, sell, or hold ` +
+    `recommendation, and do not predict the stock price.`;
+
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      model: OPENAI_MODEL,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are Zelothorn, a financial explainer. You describe public " +
+            "companies in plain, friendly language. You never give investment " +
+            "advice and never tell anyone what to buy or sell."
+        },
+        { role: "user", content: userPrompt }
+      ],
+      max_completion_tokens: 1200
+    })
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`OpenAI request failed (status ${response.status}): ${errText}`);
+  }
+
+  const data = await response.json();
+  const summary =
+    data.choices &&
+    data.choices[0] &&
+    data.choices[0].message &&
+    data.choices[0].message.content
+      ? data.choices[0].message.content.trim()
+      : "";
+
+  if (!summary) {
+    throw new Error("OpenAI returned an empty summary");
+  }
+
+  return summary;
+}
+
 /* =========================
    MAIN ENDPOINT:  /resolve?ticker=XXXX
-   Works for ANY US-listed ticker now, not just the old 4.
+   Returns: AI summary (Phase 1) + SEC filings (Phase 2)
    ========================= */
 app.get("/resolve", async (req, res) => {
   const ticker = req.query.ticker;
@@ -114,9 +188,21 @@ app.get("/resolve", async (req, res) => {
 
     const filings = await getFilings(entry.cik);
 
+    // Phase 1 — try to add the AI summary. If it fails, we still
+    // return all the SEC data so the report is never fully broken.
+    let aiSummary = null;
+    let aiError = null;
+    try {
+      aiSummary = await generateSummary(entry.title, ticker.toUpperCase(), filings);
+    } catch (e) {
+      aiError = e.message;
+    }
+
     res.json({
       ticker: ticker.toUpperCase(),
       company: entry.title,
+      ai_summary: aiSummary,   // Phase 1 result (null if it failed)
+      ai_error: aiError,       // null when the summary worked
       cik: entry.cik,
       sec_url: `https://data.sec.gov/submissions/CIK${entry.cik}.json`,
       filings: filings
