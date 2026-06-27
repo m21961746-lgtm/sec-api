@@ -16,6 +16,12 @@
       --card: #ffffff;
       --accent: #f3dede;
       --accent-ink: #5a4750;
+      --beat: #2f8f5b;
+      --beat-bg: #e6f4ec;
+      --miss: #b8474a;
+      --miss-bg: #f8e7e7;
+      --met: #6b7180;
+      --met-bg: #eef0f4;
     }
 
     * { box-sizing: border-box; }
@@ -95,7 +101,6 @@
     .search button:active { transform: scale(0.98); }
     .search button:disabled { opacity: 0.55; cursor: default; }
 
-    /* states */
     .status {
       text-align: center;
       color: var(--muted);
@@ -122,7 +127,6 @@
       box-shadow: 0 8px 30px rgba(80, 70, 90, 0.08);
     }
 
-    /* report */
     .report { display: none; }
 
     .card {
@@ -153,7 +157,12 @@
       letter-spacing: 1.5px;
       text-transform: uppercase;
       color: #a98e9a;
-      margin: 0 0 14px;
+      margin: 0 0 6px;
+    }
+    .section-sub {
+      font-size: 13px;
+      color: var(--muted);
+      margin: 0 0 16px;
     }
 
     .summary p {
@@ -172,6 +181,57 @@
       border-radius: 10px;
     }
 
+    .earn-headline {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+    .badge {
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      padding: 6px 14px;
+      border-radius: 999px;
+      text-transform: uppercase;
+    }
+    .badge.beat { color: var(--beat); background: var(--beat-bg); }
+    .badge.miss { color: var(--miss); background: var(--miss-bg); }
+    .badge.met  { color: var(--met);  background: var(--met-bg); }
+
+    .earn-sentence {
+      font-size: 16.5px;
+      line-height: 1.7;
+      color: #4b5060;
+      margin: 0 0 18px;
+    }
+    .earn-sentence b { color: var(--ink); }
+
+    .earn-track-label {
+      font-size: 12px;
+      letter-spacing: 0.5px;
+      color: var(--muted);
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .earn-track {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .track-pill {
+      font-size: 12.5px;
+      padding: 6px 10px;
+      border-radius: 8px;
+      background: #f7f6f9;
+      color: var(--muted);
+    }
+    .track-pill .r { font-weight: 700; }
+    .track-pill .r.beat { color: var(--beat); }
+    .track-pill .r.miss { color: var(--miss); }
+    .track-pill .r.met  { color: var(--met); }
+
     .filing {
       display: flex;
       justify-content: space-between;
@@ -179,11 +239,22 @@
       gap: 14px;
       padding: 13px 0;
       border-bottom: 1px solid var(--line);
+      text-decoration: none;
     }
     .filing:last-child { border-bottom: none; }
+    .filing:hover .filing-name { text-decoration: underline; }
     .filing-name { font-weight: 500; color: var(--ink); font-size: 15.5px; }
-    .filing-code { color: var(--muted); font-size: 12.5px; }
+    .filing-desc { color: var(--muted); font-size: 13px; margin-top: 2px; }
     .filing-date { color: var(--muted); font-size: 14px; white-space: nowrap; }
+
+    .subhead {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--ink);
+      margin: 4px 0 4px;
+    }
+    .filing-group { margin-bottom: 22px; }
+    .filing-group:last-child { margin-bottom: 0; }
 
     .edgar-link {
       display: inline-block;
@@ -209,7 +280,7 @@
   <div class="wrap">
     <header>
       <h1>Zelothorn</h1>
-      <p class="tagline">Enter a stock ticker to get a plain-language explanation of the company, backed by its official SEC filings.</p>
+      <p class="tagline">Enter a stock ticker to get a plain-language explanation of the company, its official SEC filings, and how its latest earnings stacked up against expectations.</p>
     </header>
 
     <div class="search">
@@ -236,44 +307,56 @@
       </div>
 
       <div class="card">
-        <p class="section-label">Recent SEC Filings</p>
+        <p class="section-label">Earnings &amp; Performance</p>
+        <p class="section-sub">How the company's latest results compared to what analysts expected.</p>
+        <div id="earnings"></div>
+      </div>
+
+      <div class="card">
+        <p class="section-label">SEC Filings</p>
+        <p class="section-sub">Official documents the company files with the U.S. government. Click any one to read it on SEC.gov.</p>
         <div id="filings"></div>
         <a class="edgar-link" id="edgarLink" href="#" target="_blank" rel="noopener">View all filings on SEC.gov →</a>
       </div>
 
       <p class="disclaimer">
-        Zelothorn provides AI-generated explanations and official SEC data for educational
+        Zelothorn provides AI-generated explanations and official data for educational
         purposes only. It does not provide financial advice and does not tell you what to buy or sell.
       </p>
     </div>
   </div>
 
   <script>
-    // Plain-English names for common SEC filing codes
-    const FORM_NAMES = {
-      "10-K": "Annual report",
-      "10-Q": "Quarterly report",
-      "8-K": "Material event",
-      "4": "Insider trade",
-      "3": "Insider ownership",
-      "5": "Insider annual summary",
-      "SD": "Specialized disclosure",
-      "DEF 14A": "Proxy statement (shareholder vote)",
-      "S-1": "IPO / new share registration",
-      "144": "Notice of proposed share sale",
-      "SC 13G": "Large shareholder stake",
-      "SC 13D": "Activist shareholder stake"
+    const FORM_INFO = {
+      "10-K":    { name: "Annual report",        desc: "The company's big yearly financial report." },
+      "10-Q":    { name: "Quarterly report",     desc: "A financial update covering the last 3 months." },
+      "8-K":     { name: "Material event",       desc: "A heads-up about something important that just happened." },
+      "4":       { name: "Insider trade",        desc: "An executive or director bought or sold company shares." },
+      "3":       { name: "Insider ownership",    desc: "A new insider's first report of the shares they hold." },
+      "5":       { name: "Insider annual summary",desc: "A yearly wrap-up of an insider's share activity." },
+      "SD":      { name: "Specialized disclosure",desc: "A required disclosure (e.g. on sourcing of minerals)." },
+      "DEF 14A": { name: "Proxy statement",      desc: "Info for shareholders ahead of a vote." },
+      "S-1":     { name: "New share registration",desc: "Paperwork to offer new shares (often an IPO)." },
+      "S-8":     { name: "Employee share plan",  desc: "Registering shares offered to employees." },
+      "144":     { name: "Proposed share sale",  desc: "Notice that an insider plans to sell some shares." },
+      "SC 13G":  { name: "Large shareholder",    desc: "A big investor reporting a sizable stake." },
+      "SC 13D":  { name: "Activist shareholder", desc: "A big investor with intentions to influence the company." }
     };
 
-    function escapeHtml(str) {
-      return String(str)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;");
+    function formInfo(form) {
+      return FORM_INFO[form] || { name: "SEC filing", desc: "An official filing with the SEC." };
     }
 
+    function escapeHtml(str) {
+      return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
     function show(el) { el.style.display = "block"; }
     function hide(el) { el.style.display = "none"; }
+
+    function money(v) {
+      if (v === null || v === undefined || isNaN(v)) return "—";
+      return (v < 0 ? "-$" : "$") + Math.abs(v).toFixed(2);
+    }
 
     const statusBox = document.getElementById("status");
     const statusText = document.getElementById("statusText");
@@ -291,13 +374,11 @@
 
       hide(errorBox);
       hide(reportBox);
-      statusText.textContent = "Analyzing " + ticker + " — reading SEC filings and writing the summary…";
+      statusText.textContent = "Analyzing " + ticker + " — reading filings, earnings, and writing the summary…";
       show(statusBox);
       goBtn.disabled = true;
 
       try {
-        // Always talk to the live engine on Render, so this page works whether
-        // it's opened locally for testing OR deployed to the site.
         const API = "https://zelothorn-api.onrender.com";
         const res = await fetch(API + "/resolve?ticker=" + encodeURIComponent(ticker));
         const data = await res.json();
@@ -320,17 +401,13 @@
     }
 
     function renderReport(data) {
-      // Company header
       document.getElementById("companyName").textContent = data.company || data.ticker;
-      document.getElementById("companyMeta").textContent =
-        data.ticker + "  ·  CIK " + data.cik;
+      document.getElementById("companyMeta").textContent = data.ticker + "  ·  CIK " + data.cik;
 
-      // AI summary (split into paragraphs)
       const summaryEl = document.getElementById("summary");
       summaryEl.innerHTML = "";
       if (data.ai_summary) {
-        const paras = data.ai_summary.split(/\n\s*\n/).filter(p => p.trim());
-        paras.forEach(p => {
+        data.ai_summary.split(/\n\s*\n/).filter(p => p.trim()).forEach(p => {
           const el = document.createElement("p");
           el.textContent = p.trim();
           summaryEl.appendChild(el);
@@ -338,31 +415,124 @@
       } else {
         const note = document.createElement("div");
         note.className = "note";
-        note.textContent = "The AI summary couldn't be generated this time, but the official SEC filings below are still accurate.";
+        note.textContent = "The AI summary couldn't be generated this time, but the data below is still accurate.";
         summaryEl.appendChild(note);
       }
 
-      // Filings
-      const filingsEl = document.getElementById("filings");
-      filingsEl.innerHTML = "";
-      (data.filings || []).forEach(f => {
-        const friendly = FORM_NAMES[f.form] || "SEC filing";
-        const row = document.createElement("div");
-        row.className = "filing";
-        row.innerHTML =
-          '<div><span class="filing-name">' + escapeHtml(friendly) + '</span> ' +
-          '<span class="filing-code">(' + escapeHtml(f.form) + ')</span></div>' +
-          '<div class="filing-date">' + escapeHtml(f.filingDate) + '</div>';
-        filingsEl.appendChild(row);
-      });
+      renderEarnings(data);
+      renderFilings(data);
 
-      // EDGAR link
-      document.getElementById("edgarLink").href =
-        "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=" +
-        encodeURIComponent(data.cik) + "&type=&dateb=&owner=include&count=40";
+      document.getElementById("edgarLink").href = data.sec_url ||
+        ("https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=" + encodeURIComponent(data.cik));
     }
 
-    // Allow pressing Enter to search
+    function renderEarnings(data) {
+      const el = document.getElementById("earnings");
+      el.innerHTML = "";
+
+      if (!data.earnings) {
+        const note = document.createElement("div");
+        note.className = "note";
+        note.textContent = data.earnings_error ||
+          "Earnings expectation data isn't available for this company yet.";
+        el.appendChild(note);
+        return;
+      }
+
+      const latest = data.earnings.latest;
+      const result = latest.result;
+      const label = result === "beat" ? "Beat" : (result === "miss" ? "Missed" : "Met");
+
+      const head = document.createElement("div");
+      head.className = "earn-headline";
+      head.innerHTML =
+        '<span class="badge ' + result + '">' + label + ' expectations</span>' +
+        '<span style="color:var(--muted);font-size:14px;">Quarter ending ' + escapeHtml(latest.period) + '</span>';
+      el.appendChild(head);
+
+      const company = data.company || data.ticker;
+      let tail;
+      if (result === "beat") {
+        tail = "That <b>beat</b> what analysts expected" +
+          (latest.surprise != null ? " by " + money(Math.abs(latest.surprise)) +
+            (latest.surprisePercent != null ? " (" + Math.abs(latest.surprisePercent).toFixed(1) + "%)" : "") : "") + ".";
+      } else if (result === "miss") {
+        tail = "That came in <b>below</b> what analysts expected" +
+          (latest.surprise != null ? " by " + money(Math.abs(latest.surprise)) +
+            (latest.surprisePercent != null ? " (" + Math.abs(latest.surprisePercent).toFixed(1) + "%)" : "") : "") + ".";
+      } else {
+        tail = "That <b>matched</b> what analysts expected.";
+      }
+
+      const sentence = document.createElement("p");
+      sentence.className = "earn-sentence";
+      sentence.innerHTML =
+        "In the most recent quarter, " + escapeHtml(company) + " reported earnings of <b>" +
+        money(latest.actualEPS) + " per share</b>. Analysts had expected <b>" +
+        money(latest.estimateEPS) + "</b>. " + tail;
+      el.appendChild(sentence);
+
+      if (data.earnings.history && data.earnings.history.length > 1) {
+        const tl = document.createElement("div");
+        tl.className = "earn-track-label";
+        tl.textContent = "Recent track record";
+        el.appendChild(tl);
+
+        const track = document.createElement("div");
+        track.className = "earn-track";
+        data.earnings.history.forEach(q => {
+          const word = q.result === "beat" ? "Beat" : (q.result === "miss" ? "Miss" : "Met");
+          const pill = document.createElement("div");
+          pill.className = "track-pill";
+          pill.innerHTML = escapeHtml(q.period) + ' · <span class="r ' + q.result + '">' + word + '</span>';
+          track.appendChild(pill);
+        });
+        el.appendChild(track);
+      }
+    }
+
+    function filingRow(f) {
+      const info = formInfo(f.form);
+      const a = document.createElement("a");
+      a.className = "filing";
+      a.href = f.url || "#";
+      a.target = "_blank";
+      a.rel = "noopener";
+      a.innerHTML =
+        '<div><span class="filing-name">' + escapeHtml(info.name) +
+        '</span> <span style="color:var(--muted);font-size:12.5px;">(' + escapeHtml(f.form) + ')</span>' +
+        '<div class="filing-desc">' + escapeHtml(info.desc) + '</div></div>' +
+        '<div class="filing-date">' + escapeHtml(f.filingDate) + '</div>';
+      return a;
+    }
+
+    function renderFilings(data) {
+      const el = document.getElementById("filings");
+      el.innerHTML = "";
+
+      if (data.keyFilings && data.keyFilings.length) {
+        const group = document.createElement("div");
+        group.className = "filing-group";
+        const h = document.createElement("div");
+        h.className = "subhead";
+        h.textContent = "Key filings";
+        group.appendChild(h);
+        data.keyFilings.forEach(f => group.appendChild(filingRow(f)));
+        el.appendChild(group);
+      }
+
+      if (data.filings && data.filings.length) {
+        const group = document.createElement("div");
+        group.className = "filing-group";
+        const h = document.createElement("div");
+        h.className = "subhead";
+        h.textContent = "Most recent filings";
+        group.appendChild(h);
+        data.filings.forEach(f => group.appendChild(filingRow(f)));
+        el.appendChild(group);
+      }
+    }
+
     document.getElementById("ticker").addEventListener("keydown", function (e) {
       if (e.key === "Enter") getReport();
     });
