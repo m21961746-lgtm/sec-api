@@ -34,6 +34,19 @@ const OPENAI_MODEL = "gpt-5.4-mini";
 const FINNHUB_BASE = "https://finnhub.io/api/v1";
 
 /* ===================================================
+   BRAND-NAME OVERRIDES (polish)
+   A few well-known companies keep an older *legal* name
+   on file with the SEC while operating under a newer
+   brand. SEC's data only carries the legal name, so we
+   override those specific cases here. SEC's name is still
+   the default for every company not listed below.
+   To add one later: "TICKER": "Brand Name".
+   =================================================== */
+const NAME_OVERRIDES = {
+  "GE": "GE Aerospace"
+};
+
+/* ===================================================
    DYNAMIC TICKER -> CIK LOOKUP
    =================================================== */
 let tickerMap = null;
@@ -134,26 +147,6 @@ function tidyCompanyName(name) {
       return w.charAt(0).toUpperCase() + w.slice(1);
     })
     .join(" ");
-}
-
-/* ===================================================
-   CURRENT COMPANY NAME (polish)
-   SEC's name can be outdated (e.g. "General Electric Co."
-   instead of "GE Aerospace"). Finnhub usually has the
-   current name; fall back to SEC's if not.
-   =================================================== */
-async function getCompanyName(ticker, fallbackName) {
-  const apiKey = process.env.FINNHUB_API_KEY;
-  if (!apiKey) return fallbackName;
-  try {
-    const url = `${FINNHUB_BASE}/stock/profile2?symbol=${encodeURIComponent(ticker)}&token=${apiKey}`;
-    const res = await fetch(url);
-    if (!res.ok) return fallbackName;
-    const data = await res.json();
-    return data && data.name && data.name.trim() ? data.name.trim() : fallbackName;
-  } catch (e) {
-    return fallbackName;
-  }
 }
 
 /* ===================================================
@@ -297,9 +290,9 @@ app.get("/resolve", async (req, res) => {
     // SEC filings (Phase 2)
     const filingsData = await getFilings(entry.cik);
 
-    // Current company name (polish) — SEC's submissions feed carries the
-    // up-to-date entity name and updates on rename (e.g. "GE Aerospace").
-    const companyName = tidyCompanyName(filingsData.name || entry.title);
+    // Company name: a known brand override first, otherwise SEC's current
+    // entity name from the submissions feed (falls back to the ticker title).
+    const companyName = NAME_OVERRIDES[T] || tidyCompanyName(filingsData.name || entry.title);
 
     // AI summary (Phase 1) — graceful: failure doesn't break the report
     let aiSummary = null;
