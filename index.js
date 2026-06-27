@@ -113,7 +113,27 @@ async function getFilings(cik) {
     if (found) keyFilings.push(found);
   }
 
-  return { recent: recentList, key: keyFilings };
+  return { recent: recentList, key: keyFilings, name: data.name || null };
+}
+
+/* ===================================================
+   NAME TIDY (polish)
+   SEC's current entity name is usually proper case, but
+   if it ever comes back ALL CAPS, title-case it while
+   keeping short acronyms (GE, IBM, AI) uppercase.
+   =================================================== */
+function tidyCompanyName(name) {
+  if (!name) return name;
+  if (/[a-z]/.test(name)) return name; // already mixed case — trust it
+  return name
+    .toLowerCase()
+    .split(/\s+/)
+    .map(w => {
+      const core = w.replace(/[^a-z]/gi, "");
+      if (core.length > 0 && core.length <= 3) return w.toUpperCase();
+      return w.charAt(0).toUpperCase() + w.slice(1);
+    })
+    .join(" ");
 }
 
 /* ===================================================
@@ -277,8 +297,9 @@ app.get("/resolve", async (req, res) => {
     // SEC filings (Phase 2)
     const filingsData = await getFilings(entry.cik);
 
-    // Current company name (polish) — defaults to SEC's name if Finnhub has none
-    const companyName = await getCompanyName(T, entry.title);
+    // Current company name (polish) — SEC's submissions feed carries the
+    // up-to-date entity name and updates on rename (e.g. "GE Aerospace").
+    const companyName = tidyCompanyName(filingsData.name || entry.title);
 
     // AI summary (Phase 1) — graceful: failure doesn't break the report
     let aiSummary = null;
