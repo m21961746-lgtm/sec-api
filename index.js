@@ -1,12 +1,38 @@
+const express = require("express");
+const cors = require("cors");
+const path = require("path");
 
+const app = express();
+
+app.use(cors());
+app.use(express.json());
+
+/* =========================
+   SERVE THE FRONTEND
+   ========================= */
+app.use(express.static(path.join(__dirname, "public")));
+
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
+/* =========================
+   SEC REQUEST SETTINGS
+   ========================= */
+const SEC_HEADERS = {
+  "User-Agent": "Zelothorn (https://zelothorn-api.onrender.com)"
+};
+
+/* =========================
+   AI MODEL SETTINGS (Phase 1)
    ========================= */
 const OPENAI_MODEL = "gpt-5.4-mini";
- 
+
 /* =========================
    FINNHUB SETTINGS (Phase 3)
    ========================= */
 const FINNHUB_BASE = "https://finnhub.io/api/v1";
- 
+
 /* ===================================================
    BRAND-NAME OVERRIDES (polish)
    A few well-known companies keep an older *legal* name
@@ -19,29 +45,29 @@ const FINNHUB_BASE = "https://finnhub.io/api/v1";
 const NAME_OVERRIDES = {
   "GE": "GE Aerospace"
 };
- 
+
 /* ===================================================
    DYNAMIC TICKER -> CIK LOOKUP
    =================================================== */
 let tickerMap = null;
 let tickerMapLoadedAt = 0;
 const ONE_DAY = 24 * 60 * 60 * 1000;
- 
+
 async function loadTickerMap() {
   if (tickerMap && Date.now() - tickerMapLoadedAt < ONE_DAY) {
     return tickerMap;
   }
- 
+
   const res = await fetch("https://www.sec.gov/files/company_tickers.json", {
     headers: SEC_HEADERS
   });
- 
+
   if (!res.ok) {
     throw new Error(`SEC ticker list request failed (status ${res.status})`);
   }
- 
+
   const data = await res.json();
- 
+
   const map = {};
   for (const key in data) {
     const row = data[key];
@@ -49,12 +75,12 @@ async function loadTickerMap() {
     const cik = String(row.cik_str).padStart(10, "0");
     map[ticker] = { cik, title: row.title };
   }
- 
+
   tickerMap = map;
   tickerMapLoadedAt = Date.now();
   return tickerMap;
 }
- 
+
 /* ===================================================
    FETCH SEC FILINGS  (Phase 2, now with direct links
    + a separate "key filings" list of the important ones)
@@ -62,15 +88,15 @@ async function loadTickerMap() {
 async function getFilings(cik) {
   const url = `https://data.sec.gov/submissions/CIK${cik}.json`;
   const res = await fetch(url, { headers: SEC_HEADERS });
- 
+
   if (!res.ok) {
     throw new Error(`SEC filings request failed (status ${res.status})`);
   }
- 
+
   const data = await res.json();
   const recent = data.filings.recent;
   const cikInt = parseInt(cik, 10);
- 
+
   const all = [];
   const n = recent.form.length;
   for (let i = 0; i < n; i++) {
@@ -80,7 +106,7 @@ async function getFilings(cik) {
     const link = primaryDoc
       ? `https://www.sec.gov/Archives/edgar/data/${cikInt}/${accNoDashes}/${primaryDoc}`
       : `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${cik}&type=&dateb=&owner=include&count=40`;
- 
+
     all.push({
       form: recent.form[i],
       filingDate: recent.filingDate[i],
@@ -88,10 +114,10 @@ async function getFilings(cik) {
       url: link
     });
   }
- 
+
   // The 10 most recent filings overall
   const recentList = all.slice(0, 10);
- 
+
   // The single most recent of each "important" type (already date-sorted newest-first)
   const importantTypes = ["10-K", "10-Q", "8-K"];
   const keyFilings = [];
@@ -99,10 +125,10 @@ async function getFilings(cik) {
     const found = all.find(f => f.form === t);
     if (found) keyFilings.push(found);
   }
- 
+
   return { recent: recentList, key: keyFilings, name: data.name || null };
 }
- 
+
 /* ===================================================
    NAME TIDY (polish)
    SEC's current entity name is usually proper case, but
@@ -122,7 +148,7 @@ function tidyCompanyName(name) {
     })
     .join(" ");
 }
- 
+
 /* ===================================================
    CURRENT COMPANY NAME (polish)
    SEC's name can be outdated (e.g. "General Electric Co."
@@ -142,7 +168,7 @@ async function getCompanyName(ticker, fallbackName) {
     return fallbackName;
   }
 }
- 
+
 /* ===================================================
    PHASE 3: EARNINGS (beat / miss)
    SEC tells us what a company ACTUALLY earned; Finnhub
@@ -153,29 +179,29 @@ async function getEarnings(ticker) {
   if (!apiKey) {
     throw new Error("FINNHUB_API_KEY is not set on the server");
   }
- 
+
   const url = `${FINNHUB_BASE}/stock/earnings?symbol=${encodeURIComponent(ticker)}&token=${apiKey}`;
   const res = await fetch(url);
- 
+
   if (!res.ok) {
     throw new Error(`Finnhub request failed (status ${res.status})`);
   }
- 
+
   const data = await res.json();
   if (!Array.isArray(data) || data.length === 0) {
     return null; // no estimates for this company
   }
- 
+
   // Keep only quarters that have both a real result and an estimate
   const valid = data.filter(
     q => q.actual !== null && q.actual !== undefined &&
          q.estimate !== null && q.estimate !== undefined
   );
   if (valid.length === 0) return null;
- 
+
   // Newest first
   valid.sort((a, b) => (a.period < b.period ? 1 : -1));
- 
+
   const quarters = valid.slice(0, 4).map(q => {
     let result = "met";
     if (q.actual > q.estimate) result = "beat";
@@ -189,10 +215,10 @@ async function getEarnings(ticker) {
       result: result
     };
   });
- 
+
   return { latest: quarters[0], history: quarters };
 }
- 
+
 /* ===================================================
    PHASE 1: AI SUMMARY
    =================================================== */
@@ -201,11 +227,11 @@ async function generateSummary(company, ticker, filings) {
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY is not set on the server");
   }
- 
+
   const filingLines = filings
     .map(f => `- ${f.form} filed ${f.filingDate}`)
     .join("\n");
- 
+
   const userPrompt =
     `Company: ${company} (ticker ${ticker}).\n` +
     `Recent SEC filings:\n${filingLines}\n\n` +
@@ -214,7 +240,7 @@ async function generateSummary(company, ticker, filings) {
     `does to make money, and give a high-level overview of its operations. ` +
     `Use 2-3 short paragraphs. Do NOT give any buy, sell, or hold ` +
     `recommendation, and do not predict the stock price.`;
- 
+
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -236,12 +262,12 @@ async function generateSummary(company, ticker, filings) {
       max_completion_tokens: 1200
     })
   });
- 
+
   if (!response.ok) {
     const errText = await response.text();
     throw new Error(`OpenAI request failed (status ${response.status}): ${errText}`);
   }
- 
+
   const data = await response.json();
   const summary =
     data.choices &&
@@ -250,44 +276,44 @@ async function generateSummary(company, ticker, filings) {
     data.choices[0].message.content
       ? data.choices[0].message.content.trim()
       : "";
- 
+
   if (!summary) {
     throw new Error("OpenAI returned an empty summary");
   }
- 
+
   return summary;
 }
- 
+
 /* =========================
    MAIN ENDPOINT:  /resolve?ticker=XXXX
    Phase 1 (AI summary) + Phase 2 (SEC filings) + Phase 3 (earnings)
    ========================= */
 app.get("/resolve", async (req, res) => {
   const ticker = req.query.ticker;
- 
+
   if (!ticker) {
     return res.status(400).json({ error: "Missing ticker" });
   }
- 
+
   const T = ticker.toUpperCase();
- 
+
   try {
     const map = await loadTickerMap();
     const entry = map[T];
- 
+
     if (!entry) {
       return res.status(404).json({
         error: `Ticker '${T}' not found in SEC's company list.`
       });
     }
- 
+
     // SEC filings (Phase 2)
     const filingsData = await getFilings(entry.cik);
- 
+
     // Current company name (polish) — SEC's submissions feed carries the
     // up-to-date entity name and updates on rename (e.g. "GE Aerospace").
     const companyName = NAME_OVERRIDES[T] || tidyCompanyName(filingsData.name || entry.title);
- 
+
     // AI summary (Phase 1) — graceful: failure doesn't break the report
     let aiSummary = null;
     let aiError = null;
@@ -296,7 +322,7 @@ app.get("/resolve", async (req, res) => {
     } catch (e) {
       aiError = e.message;
     }
- 
+
     // Earnings (Phase 3) — graceful: failure/no-data doesn't break the report
     let earnings = null;
     let earningsError = null;
@@ -308,7 +334,7 @@ app.get("/resolve", async (req, res) => {
     } catch (e) {
       earningsError = e.message;
     }
- 
+
     res.json({
       ticker: T,
       company: companyName,
@@ -328,8 +354,8 @@ app.get("/resolve", async (req, res) => {
     });
   }
 });
- 
- 
+
+
 /* ===================================================
    SEO COMPANY PAGES  (Stage 1)
    Serves a real, Google-readable page per company at
@@ -339,10 +365,10 @@ app.get("/resolve", async (req, res) => {
    Each generated page is cached in memory so it only
    builds once (fast + saves API calls).
    =================================================== */
- 
+
 // simple in-memory cache: TICKER -> finished HTML string
 const seoPageCache = {};
- 
+
 // escape user/text content so it can't break the HTML
 function escapeHtml(str) {
   if (!str) return "";
@@ -353,7 +379,7 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 }
- 
+
 // turn a plain-text summary (with blank-line paragraphs) into <p> tags
 function paragraphsToHtml(text) {
   if (!text) return "";
@@ -362,19 +388,19 @@ function paragraphsToHtml(text) {
     .map(p => `<p>${escapeHtml(p.trim())}</p>`)
     .join("\n");
 }
- 
+
 app.get("/company/:ticker", async (req, res) => {
   const T = String(req.params.ticker || "").toUpperCase();
- 
+
   // serve cached page if we already built it
   if (seoPageCache[T]) {
     return res.send(seoPageCache[T]);
   }
- 
+
   try {
     const map = await loadTickerMap();
     const entry = map[T];
- 
+
     if (!entry) {
       return res.status(404).send(
         `<!DOCTYPE html><html><head><meta charset="utf-8">` +
@@ -384,20 +410,20 @@ app.get("/company/:ticker", async (req, res) => {
         `<p><a href="/">Back to Zelothorn</a></p></body></html>`
       );
     }
- 
+
     const filingsData = await getFilings(entry.cik);
     const companyName = NAME_OVERRIDES[T] || tidyCompanyName(filingsData.name || entry.title);
- 
+
     // AI summary (graceful)
     let aiSummary = null;
     try { aiSummary = await generateSummary(companyName, T, filingsData.recent); }
     catch (e) { aiSummary = null; }
- 
+
     // Earnings (graceful)
     let earnings = null;
     try { earnings = await getEarnings(T); }
     catch (e) { earnings = null; }
- 
+
     // Build an earnings sentence if we have it
     let earningsHtml = "";
     if (earnings && earnings.latest) {
@@ -410,16 +436,16 @@ app.get("/company/:ticker", async (req, res) => {
         `$${escapeHtml(L.estimateEPS)} per share, so the company <strong>${verb}</strong> ` +
         `expectations.</p>`;
     }
- 
+
     const summaryHtml = aiSummary
       ? paragraphsToHtml(aiSummary)
       : `<p>A plain-language overview for ${escapeHtml(companyName)} is being prepared. ` +
         `You can look up this company directly on <a href="/">Zelothorn</a>.</p>`;
- 
+
     const title = `What does ${companyName} do? | ${T} explained | Zelothorn`;
     const metaDesc = `A plain-English explanation of what ${companyName} (${T}) does, ` +
       `how it makes money, and how its latest earnings compared to expectations.`;
- 
+
     const html =
 `<!DOCTYPE html>
 <html lang="en">
@@ -452,10 +478,10 @@ app.get("/company/:ticker", async (req, res) => {
   selling any security.</p>
 </body>
 </html>`;
- 
+
     seoPageCache[T] = html;   // cache it
     res.send(html);
- 
+
   } catch (err) {
     res.status(500).send(
       `<!DOCTYPE html><html><head><meta charset="utf-8">` +
@@ -466,12 +492,12 @@ app.get("/company/:ticker", async (req, res) => {
     );
   }
 });
- 
+
 /* =========================
    START SERVER
    ========================= */
 const PORT = process.env.PORT || 3000;
- 
+
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server running on port ${PORT}`);
 });
