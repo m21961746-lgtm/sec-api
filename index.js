@@ -493,6 +493,54 @@ app.get("/company/:ticker", async (req, res) => {
   }
 });
 
+
+/* ===================================================
+   SEO SITEMAP  (Stage 2 + 3)
+   SEO_TICKERS = the focused list of companies we
+   generate indexable /company/ pages for. /sitemap.xml
+   lists every one of those URLs so Google can discover
+   and crawl them. Start focused (~200), scale later.
+   =================================================== */
+const SEO_TICKERS = [
+  "AAPL","MSFT","GOOGL","AMZN","NVDA","META","TSLA","BRK.B","JPM","V",
+  "UNH","XOM","JNJ","WMT","MA","PG","HD","CVX","LLY","ABBV",
+  "AVGO","PEP","KO","COST","MRK","ADBE","CSCO","MCD","CRM","ACN",
+  "TMO","ABT","NKE","DHR","LIN","TXN","NEE","ORCL","PM","WFC",
+  "DIS","INTC","AMD","QCOM","IBM","CAT","GE","BA","HON","AMGN",
+  "UPS","LOW","INTU","SBUX","GS","BLK","ELV","DE","AXP","SPGI",
+  "PLD","BKNG","MDT","GILD","ADP","TJX","VRTX","C","LMT","SCHW",
+  "MDLZ","CVS","MO","AMT","CI","SO","ZTS","DUK","BDX","CB",
+  "MMC","REGN","PGR","AON","ITW","EOG","SLB","APD","BSX","NOC",
+  "PANW","MU","LRCX","KLAC","SNPS","CDNS","MELI","ABNB","PYPL","SQ",
+  "SHOP","UBER","LYFT","SNAP","PINS","SPOT","NET","DDOG","SNOW","CRWD",
+  "ZM","DOCU","ROKU","TWLO","OKTA","TEAM","ZS","MDB","PLTR","COIN",
+  "HOOD","SOFI","RBLX","DASH","RIVN","LCID","F","GM","NIO","XPEV",
+  "T","VZ","TMUS","CMCSA","NFLX","WBD","PARA","FOX","EA","TTWO",
+  "MAR","HLT","LULU","ROST","DG","DLTR","ORLY","AZO","YUM","CMG",
+  "KHC","GIS","K","HSY","STZ","KDP","MNST","CL","KMB","EL",
+  "WBA","MCK","CNC","HUM","BIIB","ILMN","MRNA","DXCM","IDXX","ISRG",
+  "NOW","FTNT","ADSK","WDAY","ANET","KEYS","GLW","HPQ","DELL","WDC",
+  "STX","NXPI","ADI","MCHP","ON","MPWR","FSLR","ENPH","PLUG","RUN",
+  "GME","AMC","BBBY","WISH","CLOV","TLRY","CGC","DKNG","PENN","WYNN"
+];
+
+app.get("/sitemap.xml", async (req, res) => {
+  const base = "https://zelothorn-api.onrender.com";
+  const urls = SEO_TICKERS.map(t =>
+    `  <url><loc>${base}/company/${encodeURIComponent(t)}</loc></url>`
+  ).join("\n");
+
+  const xml =
+`<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>${base}/</loc></url>
+${urls}
+</urlset>`;
+
+  res.header("Content-Type", "application/xml");
+  res.send(xml);
+});
+
 /* =========================
    START SERVER
    ========================= */
