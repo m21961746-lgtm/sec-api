@@ -342,11 +342,11 @@
   <div class="wrap">
     <header>
       <h1>Zelothorn</h1>
-      <p class="tagline">Enter a stock ticker to get a plain-language explanation of the company, its official SEC filings, and how its latest earnings stacked up against expectations.</p>
+      <p class="tagline">Enter a company name or stock ticker to get a plain-language explanation of the company, its official SEC filings, and how its latest earnings stacked up against expectations.</p>
     </header>
 
     <div class="search">
-      <input id="ticker" placeholder="Enter a ticker  ·  e.g. AAPL, TSLA, GOOGL" autocomplete="off" spellcheck="false" />
+      <input id="ticker" placeholder="Company name or ticker  ·  e.g. Disney, AAPL" autocomplete="off" spellcheck="false" />
       <button id="go" onclick="getReport()">Get Report</button>
     </div>
 
@@ -481,7 +481,7 @@
     async function getReport() {
       const ticker = document.getElementById("ticker").value.trim().toUpperCase();
       if (!ticker) {
-        errorBox.textContent = "Please enter a ticker symbol first.";
+        errorBox.textContent = "Please enter a company name or ticker first.";
         hide(reportBox); hide(statusBox); show(errorBox);
         return;
       }
