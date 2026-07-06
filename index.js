@@ -284,6 +284,31 @@ async function generateSummary(company, ticker, filings) {
   return summary;
 }
 
+/* ===================================================
+   NAME SEARCH (plan B)
+   If what the user typed isn't a ticker, try matching
+   it against company NAMES from SEC's list instead.
+   e.g. "DISNEY" -> finds "Walt Disney Co" -> DIS
+   =================================================== */
+function findByName(map, query) {
+  const q = query.toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+  if (!q) return null;
+
+  let startsWith = null;
+  let contains = null;
+
+  for (const ticker in map) {
+    const title = (map[ticker].title || "").toLowerCase();
+    if (!title) continue;
+
+    if (title === q) return { ticker, entry: map[ticker] };
+    if (!startsWith && title.startsWith(q)) startsWith = { ticker, entry: map[ticker] };
+    if (!contains && title.includes(q))     contains   = { ticker, entry: map[ticker] };
+  }
+
+  return startsWith || contains;
+}
+
 /* =========================
    MAIN ENDPOINT:  /resolve?ticker=XXXX
    Phase 1 (AI summary) + Phase 2 (SEC filings) + Phase 3 (earnings)
@@ -295,15 +320,24 @@ app.get("/resolve", async (req, res) => {
     return res.status(400).json({ error: "Missing ticker" });
   }
 
-  const T = ticker.toUpperCase();
+  let T = ticker.toUpperCase();
 
   try {
     const map = await loadTickerMap();
-    const entry = map[T];
+    let entry = map[T];
+
+    // Plan B: not a ticker? Try matching a company name ("DISNEY" -> DIS)
+    if (!entry) {
+      const found = findByName(map, T);
+      if (found) {
+        T = found.ticker;
+        entry = found.entry;
+      }
+    }
 
     if (!entry) {
       return res.status(404).json({
-        error: `Ticker '${T}' not found in SEC's company list.`
+        error: `We couldn't find a company matching '${ticker}'. Try the stock ticker or the company's official name.`
       });
     }
 
