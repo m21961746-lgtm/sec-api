@@ -101,6 +101,66 @@
     .search button:active { transform: scale(0.98); }
     .search button:disabled { opacity: 0.55; cursor: default; }
 
+    /* popular companies quick-pick grid */
+    .quick { margin-bottom: 26px; }
+
+    .quick-label {
+      text-align: center;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: #a98e9a;
+      margin: 0 0 12px;
+    }
+
+    .quick-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+    }
+    @media (max-width: 620px) {
+      .quick-grid { grid-template-columns: repeat(3, 1fr); }
+    }
+    @media (max-width: 420px) {
+      .quick-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    .quick-grid button {
+      border: none;
+      cursor: pointer;
+      font-family: inherit;
+      text-align: left;
+      background: var(--card);
+      border-radius: 12px;
+      padding: 12px 14px;
+      box-shadow: 0 4px 18px rgba(80, 70, 90, 0.07);
+      transition: transform 0.08s ease, box-shadow 0.15s ease;
+    }
+    .quick-grid button:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 8px 24px rgba(80, 70, 90, 0.12);
+    }
+    .quick-grid button:active { transform: scale(0.98); }
+    .quick-grid button:disabled { opacity: 0.55; cursor: default; }
+
+    .quick-ticker {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      color: var(--accent-ink);
+    }
+    .quick-name {
+      display: block;
+      font-size: 12.5px;
+      color: var(--muted);
+      margin-top: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
     .status {
       text-align: center;
       color: var(--muted);
@@ -290,6 +350,11 @@
       <button id="go" onclick="getReport()">Get Report</button>
     </div>
 
+    <div class="quick">
+      <p class="quick-label">Or pick a popular company</p>
+      <div class="quick-grid" id="quickGrid"></div>
+    </div>
+
     <div class="status" id="status">
       <div class="spinner"></div>
       <div id="statusText">Analyzing…</div>
@@ -329,6 +394,52 @@
   </div>
 
   <script>
+    // Popular companies for the quick-pick grid (ticker + friendly name)
+    const POPULAR = [
+      { t: "AAPL",  n: "Apple" },
+      { t: "MSFT",  n: "Microsoft" },
+      { t: "GOOGL", n: "Google" },
+      { t: "AMZN",  n: "Amazon" },
+      { t: "NVDA",  n: "Nvidia" },
+      { t: "META",  n: "Meta" },
+      { t: "TSLA",  n: "Tesla" },
+      { t: "NFLX",  n: "Netflix" },
+      { t: "DIS",   n: "Disney" },
+      { t: "WMT",   n: "Walmart" },
+      { t: "COST",  n: "Costco" },
+      { t: "MCD",   n: "McDonald's" },
+      { t: "SBUX",  n: "Starbucks" },
+      { t: "NKE",   n: "Nike" },
+      { t: "KO",    n: "Coca-Cola" },
+      { t: "PEP",   n: "PepsiCo" },
+      { t: "V",     n: "Visa" },
+      { t: "MA",    n: "Mastercard" },
+      { t: "JPM",   n: "JPMorgan Chase" },
+      { t: "JNJ",   n: "Johnson & Johnson" },
+      { t: "PG",    n: "Procter & Gamble" },
+      { t: "HD",    n: "Home Depot" },
+      { t: "UBER",  n: "Uber" },
+      { t: "AMD",   n: "AMD" }
+    ];
+
+    // Build the grid once on page load
+    function buildQuickGrid() {
+      const grid = document.getElementById("quickGrid");
+      POPULAR.forEach(c => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.innerHTML =
+          '<span class="quick-ticker">' + c.t + '</span>' +
+          '<span class="quick-name">' + c.n + '</span>';
+        btn.addEventListener("click", () => {
+          document.getElementById("ticker").value = c.t;
+          getReport();
+        });
+        grid.appendChild(btn);
+      });
+    }
+    buildQuickGrid();
+
     // Plain-English names + short descriptions for common SEC filing codes
     const FORM_INFO = {
       "10-K":    { name: "Annual report",        desc: "The company's big yearly financial report." },
