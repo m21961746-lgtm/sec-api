@@ -131,9 +131,6 @@ async function getFilings(cik) {
 
 /* ===================================================
    NAME TIDY (polish)
-   SEC's current entity name is usually proper case, but
-   if it ever comes back ALL CAPS, title-case it while
-   keeping short acronyms (GE, IBM, AI) uppercase.
    =================================================== */
 function tidyCompanyName(name) {
   if (!name) return name;
@@ -151,9 +148,6 @@ function tidyCompanyName(name) {
 
 /* ===================================================
    CURRENT COMPANY NAME (polish)
-   SEC's name can be outdated (e.g. "General Electric Co."
-   instead of "GE Aerospace"). Finnhub usually has the
-   current name; fall back to SEC's if not.
    =================================================== */
 async function getCompanyName(ticker, fallbackName) {
   const apiKey = process.env.FINNHUB_API_KEY;
@@ -171,8 +165,6 @@ async function getCompanyName(ticker, fallbackName) {
 
 /* ===================================================
    PHASE 3: EARNINGS (beat / miss)
-   SEC tells us what a company ACTUALLY earned; Finnhub
-   tells us what analysts EXPECTED. We compare the two.
    =================================================== */
 async function getEarnings(ticker) {
   const apiKey = process.env.FINNHUB_API_KEY;
@@ -309,6 +301,16 @@ function findByName(map, query) {
   return startsWith || contains;
 }
 
+/* ===================================================
+   REPORT CACHE (crash-proofing)
+   Once a company's report is built, keep it for 6 hours.
+   Repeat lookups (very common: everyone tries Apple)
+   are served instantly from memory — no OpenAI cost,
+   no Finnhub/SEC calls, no strain under traffic.
+   =================================================== */
+const reportCache = {};
+const REPORT_TTL = 6 * 60 * 60 * 1000; // 6 hours
+
 /* =========================
    MAIN ENDPOINT:  /resolve?ticker=XXXX
    Phase 1 (AI summary) + Phase 2 (SEC filings) + Phase 3 (earnings)
@@ -341,11 +343,16 @@ app.get("/resolve", async (req, res) => {
       });
     }
 
+    // Serve from cache if we built this report recently
+    const cached = reportCache[T];
+    if (cached && Date.now() - cached.at < REPORT_TTL) {
+      return res.json(cached.data);
+    }
+
     // SEC filings (Phase 2)
     const filingsData = await getFilings(entry.cik);
 
-    // Current company name (polish) — SEC's submissions feed carries the
-    // up-to-date entity name and updates on rename (e.g. "GE Aerospace").
+    // Current company name (polish)
     const companyName = NAME_OVERRIDES[T] || tidyCompanyName(filingsData.name || entry.title);
 
     // AI summary (Phase 1) — graceful: failure doesn't break the report
@@ -369,18 +376,25 @@ app.get("/resolve", async (req, res) => {
       earningsError = e.message;
     }
 
-    res.json({
+    const payload = {
       ticker: T,
       company: companyName,
       cik: entry.cik,
       ai_summary: aiSummary,
       ai_error: aiError,
-      earnings: earnings,           // Phase 3 result (null if unavailable)
-      earnings_error: earningsError, // null when earnings worked
+      earnings: earnings,
+      earnings_error: earningsError,
       keyFilings: filingsData.key,
       filings: filingsData.recent,
       sec_url: `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${entry.cik}&type=&dateb=&owner=include&count=40`
-    });
+    };
+
+    // Only cache complete, healthy reports (don't freeze failures for 6 hours)
+    if (aiSummary) {
+      reportCache[T] = { at: Date.now(), data: payload };
+    }
+
+    res.json(payload);
   } catch (err) {
     res.status(500).json({
       error: "Failed to fetch data",
@@ -392,12 +406,6 @@ app.get("/resolve", async (req, res) => {
 
 /* ===================================================
    SEO COMPANY PAGES  (Stage 1)
-   Serves a real, Google-readable page per company at
-   /company/TICKER (e.g. /company/AAPL). The summary +
-   earnings are written straight into the HTML as text,
-   so Google can read and rank it WITHOUT anyone typing.
-   Each generated page is cached in memory so it only
-   builds once (fast + saves API calls).
    =================================================== */
 
 // simple in-memory cache: TICKER -> finished HTML string
@@ -530,10 +538,6 @@ app.get("/company/:ticker", async (req, res) => {
 
 /* ===================================================
    SEO SITEMAP  (Stage 2 + 3)
-   SEO_TICKERS = the focused list of companies we
-   generate indexable /company/ pages for. /sitemap.xml
-   lists every one of those URLs so Google can discover
-   and crawl them. Start focused (~200), scale later.
    =================================================== */
 const SEO_TICKERS = [
   "AAPL","MSFT","GOOGL","AMZN","NVDA","META","TSLA","BRK.B","JPM","V",
