@@ -37,10 +37,7 @@ const FINNHUB_BASE = "https://finnhub.io/api/v1";
    BRAND-NAME OVERRIDES (polish)
    A few well-known companies keep an older *legal* name
    on file with the SEC while operating under a newer
-   brand. SEC's data only carries the legal name, so we
-   override those specific cases here. SEC's name is still
-   the default for every company not listed below.
-   To add one later: "TICKER": "Brand Name".
+   brand. To add one later: "TICKER": "Brand Name".
    =================================================== */
 const NAME_OVERRIDES = {
   "GE": "GE Aerospace"
@@ -82,8 +79,7 @@ async function loadTickerMap() {
 }
 
 /* ===================================================
-   FETCH SEC FILINGS  (Phase 2, now with direct links
-   + a separate "key filings" list of the important ones)
+   FETCH SEC FILINGS (Phase 2)
    =================================================== */
 async function getFilings(cik) {
   const url = `https://data.sec.gov/submissions/CIK${cik}.json`;
@@ -118,7 +114,7 @@ async function getFilings(cik) {
   // The 10 most recent filings overall
   const recentList = all.slice(0, 10);
 
-  // The single most recent of each "important" type (already date-sorted newest-first)
+  // The single most recent of each "important" type
   const importantTypes = ["10-K", "10-Q", "8-K"];
   const keyFilings = [];
   for (const t of importantTypes) {
@@ -147,23 +143,6 @@ function tidyCompanyName(name) {
 }
 
 /* ===================================================
-   CURRENT COMPANY NAME (polish)
-   =================================================== */
-async function getCompanyName(ticker, fallbackName) {
-  const apiKey = process.env.FINNHUB_API_KEY;
-  if (!apiKey) return fallbackName;
-  try {
-    const url = `${FINNHUB_BASE}/stock/profile2?symbol=${encodeURIComponent(ticker)}&token=${apiKey}`;
-    const res = await fetch(url);
-    if (!res.ok) return fallbackName;
-    const data = await res.json();
-    return data && data.name && data.name.trim() ? data.name.trim() : fallbackName;
-  } catch (e) {
-    return fallbackName;
-  }
-}
-
-/* ===================================================
    PHASE 3: EARNINGS (beat / miss)
    =================================================== */
 async function getEarnings(ticker) {
@@ -184,14 +163,12 @@ async function getEarnings(ticker) {
     return null; // no estimates for this company
   }
 
-  // Keep only quarters that have both a real result and an estimate
   const valid = data.filter(
     q => q.actual !== null && q.actual !== undefined &&
          q.estimate !== null && q.estimate !== undefined
   );
   if (valid.length === 0) return null;
 
-  // Newest first
   valid.sort((a, b) => (a.period < b.period ? 1 : -1));
 
   const quarters = valid.slice(0, 4).map(q => {
@@ -302,18 +279,64 @@ function findByName(map, query) {
 }
 
 /* ===================================================
-   REPORT CACHE (crash-proofing)
+   REPORT CACHE
    Once a company's report is built, keep it for 6 hours.
-   Repeat lookups (very common: everyone tries Apple)
-   are served instantly from memory — no OpenAI cost,
-   no Finnhub/SEC calls, no strain under traffic.
+   Repeat lookups are served instantly from memory.
    =================================================== */
 const reportCache = {};
 const REPORT_TTL = 6 * 60 * 60 * 1000; // 6 hours
 
+/* ===================================================
+   BUILD A FULL REPORT for one ticker (used by both the
+   /resolve endpoint and the pre-warmer)
+   =================================================== */
+async function buildReport(T, entry) {
+  const filingsData = await getFilings(entry.cik);
+
+  const companyName = NAME_OVERRIDES[T] || tidyCompanyName(filingsData.name || entry.title);
+
+  let aiSummary = null;
+  let aiError = null;
+  try {
+    aiSummary = await generateSummary(companyName, T, filingsData.recent);
+  } catch (e) {
+    aiError = e.message;
+  }
+
+  let earnings = null;
+  let earningsError = null;
+  try {
+    earnings = await getEarnings(T);
+    if (!earnings) {
+      earningsError = "No analyst earnings estimates are available for this company yet.";
+    }
+  } catch (e) {
+    earningsError = e.message;
+  }
+
+  const payload = {
+    ticker: T,
+    company: companyName,
+    cik: entry.cik,
+    ai_summary: aiSummary,
+    ai_error: aiError,
+    earnings: earnings,
+    earnings_error: earningsError,
+    keyFilings: filingsData.key,
+    filings: filingsData.recent,
+    sec_url: `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${entry.cik}&type=&dateb=&owner=include&count=40`
+  };
+
+  // Only cache complete, healthy reports
+  if (aiSummary) {
+    reportCache[T] = { at: Date.now(), data: payload };
+  }
+
+  return payload;
+}
+
 /* =========================
    MAIN ENDPOINT:  /resolve?ticker=XXXX
-   Phase 1 (AI summary) + Phase 2 (SEC filings) + Phase 3 (earnings)
    ========================= */
 app.get("/resolve", async (req, res) => {
   const ticker = req.query.ticker;
@@ -349,51 +372,7 @@ app.get("/resolve", async (req, res) => {
       return res.json(cached.data);
     }
 
-    // SEC filings (Phase 2)
-    const filingsData = await getFilings(entry.cik);
-
-    // Current company name (polish)
-    const companyName = NAME_OVERRIDES[T] || tidyCompanyName(filingsData.name || entry.title);
-
-    // AI summary (Phase 1) — graceful: failure doesn't break the report
-    let aiSummary = null;
-    let aiError = null;
-    try {
-      aiSummary = await generateSummary(companyName, T, filingsData.recent);
-    } catch (e) {
-      aiError = e.message;
-    }
-
-    // Earnings (Phase 3) — graceful: failure/no-data doesn't break the report
-    let earnings = null;
-    let earningsError = null;
-    try {
-      earnings = await getEarnings(T);
-      if (!earnings) {
-        earningsError = "No analyst earnings estimates are available for this company yet.";
-      }
-    } catch (e) {
-      earningsError = e.message;
-    }
-
-    const payload = {
-      ticker: T,
-      company: companyName,
-      cik: entry.cik,
-      ai_summary: aiSummary,
-      ai_error: aiError,
-      earnings: earnings,
-      earnings_error: earningsError,
-      keyFilings: filingsData.key,
-      filings: filingsData.recent,
-      sec_url: `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${entry.cik}&type=&dateb=&owner=include&count=40`
-    };
-
-    // Only cache complete, healthy reports (don't freeze failures for 6 hours)
-    if (aiSummary) {
-      reportCache[T] = { at: Date.now(), data: payload };
-    }
-
+    const payload = await buildReport(T, entry);
     res.json(payload);
   } catch (err) {
     res.status(500).json({
@@ -422,7 +401,7 @@ function escapeHtml(str) {
     .replace(/'/g, "&#39;");
 }
 
-// turn a plain-text summary (with blank-line paragraphs) into <p> tags
+// turn a plain-text summary into <p> tags
 function paragraphsToHtml(text) {
   if (!text) return "";
   return text
@@ -434,7 +413,6 @@ function paragraphsToHtml(text) {
 app.get("/company/:ticker", async (req, res) => {
   const T = String(req.params.ticker || "").toUpperCase();
 
-  // serve cached page if we already built it
   if (seoPageCache[T]) {
     return res.send(seoPageCache[T]);
   }
@@ -456,17 +434,14 @@ app.get("/company/:ticker", async (req, res) => {
     const filingsData = await getFilings(entry.cik);
     const companyName = NAME_OVERRIDES[T] || tidyCompanyName(filingsData.name || entry.title);
 
-    // AI summary (graceful)
     let aiSummary = null;
     try { aiSummary = await generateSummary(companyName, T, filingsData.recent); }
     catch (e) { aiSummary = null; }
 
-    // Earnings (graceful)
     let earnings = null;
     try { earnings = await getEarnings(T); }
     catch (e) { earnings = null; }
 
-    // Build an earnings sentence if we have it
     let earningsHtml = "";
     if (earnings && earnings.latest) {
       const L = earnings.latest;
@@ -521,7 +496,7 @@ app.get("/company/:ticker", async (req, res) => {
 </body>
 </html>`;
 
-    seoPageCache[T] = html;   // cache it
+    seoPageCache[T] = html;
     res.send(html);
 
   } catch (err) {
@@ -537,7 +512,10 @@ app.get("/company/:ticker", async (req, res) => {
 
 
 /* ===================================================
-   SEO SITEMAP  (Stage 2 + 3)
+   SEO SITEMAP + PRE-WARM LIST
+   These 200 companies get indexable /company/ pages
+   AND are kept pre-built in the report cache so the
+   main tool is instant for them, always.
    =================================================== */
 const SEO_TICKERS = [
   "AAPL","MSFT","GOOGL","AMZN","NVDA","META","TSLA","BRK.B","JPM","V",
@@ -578,6 +556,57 @@ ${urls}
   res.header("Content-Type", "application/xml");
   res.send(xml);
 });
+
+/* ===================================================
+   PRE-WARMER
+   Builds reports for every company in SEO_TICKERS so
+   visitors get them instantly — even the first visitor.
+   Runs on server start, then repeats every 6 hours.
+   Spaced 3 seconds apart to be gentle on SEC/Finnhub.
+   Skips any report that is still fresh in the cache.
+   =================================================== */
+const PREWARM_SPACING = 3000; // 3 seconds between builds
+let prewarmRunning = false;
+
+async function prewarmAll() {
+  if (prewarmRunning) return; // never run two sweeps at once
+  prewarmRunning = true;
+  console.log(`[prewarm] starting sweep of ${SEO_TICKERS.length} companies`);
+
+  try {
+    const map = await loadTickerMap();
+
+    for (const rawTicker of SEO_TICKERS) {
+      const T = rawTicker.toUpperCase();
+      const entry = map[T];
+      if (!entry) continue; // ticker not in SEC list (e.g. delisted) — skip
+
+      // still fresh? skip it
+      const cached = reportCache[T];
+      if (cached && Date.now() - cached.at < REPORT_TTL) continue;
+
+      try {
+        await buildReport(T, entry);
+        console.log(`[prewarm] built ${T}`);
+      } catch (e) {
+        console.log(`[prewarm] failed ${T}: ${e.message}`);
+      }
+
+      // brief pause so we don't hammer the APIs
+      await new Promise(r => setTimeout(r, PREWARM_SPACING));
+    }
+
+    console.log("[prewarm] sweep complete");
+  } catch (e) {
+    console.log(`[prewarm] sweep aborted: ${e.message}`);
+  } finally {
+    prewarmRunning = false;
+  }
+}
+
+// run shortly after server start, then every 6 hours
+setTimeout(prewarmAll, 10 * 1000);          // first sweep, 10s after boot
+setInterval(prewarmAll, REPORT_TTL);        // repeat sweeps every 6 hours
 
 /* =========================
    START SERVER
