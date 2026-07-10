@@ -20,7 +20,7 @@ app.get("/", (req, res) => {
    SEC REQUEST SETTINGS
    ========================= */
 const SEC_HEADERS = {
-  "User-Agent": "Zelothorn (https://zelothorn-api.onrender.com)"
+  "User-Agent": "Zelothorn (https://zelothorn.com)"
 };
 
 /* =========================
@@ -471,7 +471,7 @@ app.get("/company/:ticker", async (req, res) => {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)}</title>
 <meta name="description" content="${escapeHtml(metaDesc)}">
-<link rel="canonical" href="https://zelothorn-api.onrender.com/company/${escapeHtml(T)}">
+<link rel="canonical" href="https://zelothorn.com/company/${escapeHtml(T)}">
 <style>
   body{font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
        max-width:760px;margin:0 auto;padding:32px 20px;line-height:1.6;color:#1a1a1a;}
@@ -541,7 +541,7 @@ const SEO_TICKERS = [
 ];
 
 app.get("/sitemap.xml", async (req, res) => {
-  const base = "https://zelothorn-api.onrender.com";
+  const base = "https://zelothorn.com";
   const urls = SEO_TICKERS.map(t =>
     `  <url><loc>${base}/company/${encodeURIComponent(t)}</loc></url>`
   ).join("\n");
