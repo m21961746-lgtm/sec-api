@@ -203,12 +203,23 @@ async function generateSummary(company, ticker, filings) {
 
   const userPrompt =
     `Company: ${company} (ticker ${ticker}).\n` +
-    `Recent SEC filings:\n${filingLines}\n\n` +
+    `Background context (recent SEC filings, for your reference only):\n` +
+    `${filingLines}\n\n` +
     `Write a clear, plain-language summary for a regular person who may not ` +
     `know much about finance. Explain what this company is, what it actually ` +
     `does to make money, and give a high-level overview of its operations. ` +
-    `Use 2-3 short paragraphs. Do NOT give any buy, sell, or hold ` +
-    `recommendation, and do not predict the stock price.`;
+    `Use 2-3 short paragraphs.\n\n` +
+    `Important rules:\n` +
+    `- Write in a standalone, article-style voice, as if published on a website.\n` +
+    `- Never address the reader as "you" and never refer to this prompt, ` +
+    `the list above, or any "filings you listed".\n` +
+    `- Do NOT describe, explain, or summarize the SEC filings themselves ` +
+    `(no explaining what a Form 4, 8-K, 10-K, or any filing type is). ` +
+    `They are background context only.\n` +
+    `- Keep the entire summary about the company: what it is, what it sells, ` +
+    `and how it makes money.\n` +
+    `- Do NOT give any buy, sell, or hold recommendation, and do not predict ` +
+    `the stock price.`;
 
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -222,9 +233,12 @@ async function generateSummary(company, ticker, filings) {
         {
           role: "system",
           content:
-            "You are Zelothorn, a financial explainer. You describe public " +
-            "companies in plain, friendly language. You never give investment " +
-            "advice and never tell anyone what to buy or sell."
+            "You are Zelothorn, a financial explainer. You write standalone, " +
+            "article-style descriptions of public companies in plain, friendly " +
+            "language, suitable for publishing directly on a website. You never " +
+            "reference the prompt, the reader, or any list of filings. You never " +
+            "explain SEC filing types. You never give investment advice and " +
+            "never tell anyone what to buy or sell."
         },
         { role: "user", content: userPrompt }
       ],
