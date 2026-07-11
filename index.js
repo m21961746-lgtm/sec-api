@@ -545,13 +545,13 @@ const SEO_TICKERS = [
   "SHOP","UBER","LYFT","SNAP","PINS","SPOT","NET","DDOG","SNOW","CRWD",
   "ZM","DOCU","ROKU","TWLO","OKTA","TEAM","ZS","MDB","PLTR","COIN",
   "HOOD","SOFI","RBLX","DASH","RIVN","LCID","F","GM","NIO","XPEV",
-  "T","VZ","TMUS","CMCSA","NFLX","WBD","PARA","FOX","EA","TTWO",
+  "T","VZ","TMUS","CMCSA","NFLX","WBD","ARM","FOX","EA","TTWO",
   "MAR","HLT","LULU","ROST","DG","DLTR","ORLY","AZO","YUM","CMG",
   "KHC","GIS","K","HSY","STZ","KDP","MNST","CL","KMB","EL",
   "WBA","MCK","CNC","HUM","BIIB","ILMN","MRNA","DXCM","IDXX","ISRG",
   "NOW","FTNT","ADSK","WDAY","ANET","KEYS","GLW","HPQ","DELL","WDC",
   "STX","NXPI","ADI","MCHP","ON","MPWR","FSLR","ENPH","PLUG","RUN",
-  "GME","AMC","BBBY","WISH","CLOV","TLRY","CGC","DKNG","PENN","WYNN"
+  "GME","AMC","BBBY","SMCI","CLOV","TLRY","CGC","DKNG","PENN","WYNN"
 ];
 
 app.get("/sitemap.xml", async (req, res) => {
