@@ -401,8 +401,10 @@ app.get("/resolve", async (req, res) => {
    SEO COMPANY PAGES  (Stage 1)
    =================================================== */
 
-// simple in-memory cache: TICKER -> finished HTML string
+// simple in-memory cache: TICKER -> { at: timestamp, html: finished HTML string }
+// Pages expire after SEO_PAGE_TTL so summaries and earnings refresh themselves.
 const seoPageCache = {};
+const SEO_PAGE_TTL = 6 * 60 * 60 * 1000; // 6 hours, same as the report cache
 
 // escape user/text content so it can't break the HTML
 function escapeHtml(str) {
@@ -427,8 +429,10 @@ function paragraphsToHtml(text) {
 app.get("/company/:ticker", async (req, res) => {
   const T = String(req.params.ticker || "").toUpperCase();
 
-  if (seoPageCache[T]) {
-    return res.send(seoPageCache[T]);
+  // Serve from cache only if the page is still fresh
+  const cachedPage = seoPageCache[T];
+  if (cachedPage && Date.now() - cachedPage.at < SEO_PAGE_TTL) {
+    return res.send(cachedPage.html);
   }
 
   try {
@@ -510,7 +514,7 @@ app.get("/company/:ticker", async (req, res) => {
 </body>
 </html>`;
 
-    seoPageCache[T] = html;
+    seoPageCache[T] = { at: Date.now(), html: html };
     res.send(html);
 
   } catch (err) {
