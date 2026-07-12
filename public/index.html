@@ -493,8 +493,8 @@
       goBtn.disabled = true;
 
       try {
-        const API = "https://zelothorn-api.onrender.com";
-        const res = await fetch(API + "/resolve?ticker=" + encodeURIComponent(ticker));
+        // Call the same server this page is hosted on, whatever its domain is.
+        const res = await fetch("/resolve?ticker=" + encodeURIComponent(ticker));
         const data = await res.json();
 
         if (!res.ok) {
