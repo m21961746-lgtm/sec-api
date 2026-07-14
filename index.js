@@ -4,6 +4,10 @@ const path = require("path");
 
 const app = express();
 
+// Render sits behind a reverse proxy; trust its X-Forwarded-For header
+// so req.ip reflects the real client IP, not Render's proxy IP.
+app.set("trust proxy", 1);
+
 app.use(cors());
 app.use(express.json());
 
@@ -22,6 +26,54 @@ app.get("/", (req, res) => {
 const SEC_HEADERS = {
   "User-Agent": "Zelothorn (https://zelothorn.com)"
 };
+
+/* =========================
+   REQUEST TIMEOUT SETTINGS
+   Prevents a hung upstream call (SEC, Finnhub, OpenAI) from
+   hanging this server's request handling forever.
+   ========================= */
+const FETCH_TIMEOUT_MS = 10000;   // SEC + Finnhub: 10 seconds
+const OPENAI_TIMEOUT_MS = 25000;  // OpenAI: 25 seconds (summary generation is slower)
+
+/* =========================
+   RATE LIMITING (/resolve)
+   Caps requests per IP so the paid OpenAI calls behind
+   /resolve can't be spammed.
+   ========================= */
+const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
+const RATE_LIMIT_MAX_REQUESTS = 20;     // per IP, per window
+
+const rateLimitBuckets = new Map(); // ip -> { count, windowStart }
+
+function resolveRateLimit(req, res, next) {
+  const ip = req.ip;
+  const now = Date.now();
+  const bucket = rateLimitBuckets.get(ip);
+
+  if (!bucket || now - bucket.windowStart >= RATE_LIMIT_WINDOW_MS) {
+    rateLimitBuckets.set(ip, { count: 1, windowStart: now });
+    return next();
+  }
+
+  bucket.count++;
+  if (bucket.count > RATE_LIMIT_MAX_REQUESTS) {
+    return res.status(429).json({
+      error: "Too many requests — please wait a minute and try again."
+    });
+  }
+
+  next();
+}
+
+// Periodically clear out stale buckets so this map doesn't grow forever.
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, bucket] of rateLimitBuckets) {
+    if (now - bucket.windowStart >= RATE_LIMIT_WINDOW_MS) {
+      rateLimitBuckets.delete(ip);
+    }
+  }
+}, RATE_LIMIT_WINDOW_MS);
 
 /* =========================
    AI MODEL SETTINGS (Phase 1)
@@ -56,7 +108,8 @@ async function loadTickerMap() {
   }
 
   const res = await fetch("https://www.sec.gov/files/company_tickers.json", {
-    headers: SEC_HEADERS
+    headers: SEC_HEADERS,
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
   });
 
   if (!res.ok) {
@@ -83,7 +136,10 @@ async function loadTickerMap() {
    =================================================== */
 async function getFilings(cik) {
   const url = `https://data.sec.gov/submissions/CIK${cik}.json`;
-  const res = await fetch(url, { headers: SEC_HEADERS });
+  const res = await fetch(url, {
+    headers: SEC_HEADERS,
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
+  });
 
   if (!res.ok) {
     throw new Error(`SEC filings request failed (status ${res.status})`);
@@ -152,7 +208,7 @@ async function getEarnings(ticker) {
   }
 
   const url = `${FINNHUB_BASE}/stock/earnings?symbol=${encodeURIComponent(ticker)}&token=${apiKey}`;
-  const res = await fetch(url);
+  const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
 
   if (!res.ok) {
     throw new Error(`Finnhub request failed (status ${res.status})`);
@@ -243,7 +299,8 @@ async function generateSummary(company, ticker, filings) {
         { role: "user", content: userPrompt }
       ],
       max_completion_tokens: 1200
-    })
+    }),
+    signal: AbortSignal.timeout(OPENAI_TIMEOUT_MS)
   });
 
   if (!response.ok) {
@@ -352,14 +409,24 @@ async function buildReport(T, entry) {
 /* =========================
    MAIN ENDPOINT:  /resolve?ticker=XXXX
    ========================= */
-app.get("/resolve", async (req, res) => {
+const MAX_TICKER_LENGTH = 80; // generous enough for full company names
+
+app.get("/resolve", resolveRateLimit, async (req, res) => {
   const ticker = req.query.ticker;
 
-  if (!ticker) {
-    return res.status(400).json({ error: "Missing ticker" });
+  if (!ticker || typeof ticker !== "string") {
+    return res.status(400).json({ error: "Missing or invalid ticker parameter" });
   }
 
-  let T = ticker.toUpperCase();
+  const trimmed = ticker.trim();
+  if (!trimmed) {
+    return res.status(400).json({ error: "Missing ticker" });
+  }
+  if (trimmed.length > MAX_TICKER_LENGTH) {
+    return res.status(400).json({ error: "Ticker or company name is too long" });
+  }
+
+  let T = trimmed.toUpperCase();
 
   try {
     const map = await loadTickerMap();

@@ -342,7 +342,7 @@
   <div class="wrap">
     <header>
       <h1>Zelothorn</h1>
-      <p class="tagline">Enter a company name or stock ticker to get a plain-language explanation of the company, its official SEC filings, and how its latest earnings stacked up against expectations.</p>
+      <p class="tagline">Enter a company name or stock ticker for a plain-language explanation of the company — alongside its official SEC filings and how its latest earnings compared to expectations.</p>
     </header>
 
     <div class="search">
@@ -479,6 +479,8 @@
     const goBtn = document.getElementById("go");
 
     async function getReport() {
+      if (goBtn.disabled) return; // a request is already in flight
+
       const ticker = document.getElementById("ticker").value.trim().toUpperCase();
       if (!ticker) {
         errorBox.textContent = "Please enter a company name or ticker first.";
@@ -495,12 +497,20 @@
       try {
         // Call the same server this page is hosted on, whatever its domain is.
         const res = await fetch("/resolve?ticker=" + encodeURIComponent(ticker));
-        const data = await res.json();
 
         if (!res.ok) {
-          throw new Error(data.error || ("Something went wrong (status " + res.status + ")."));
+          let message = "Something went wrong (status " + res.status + ").";
+          try {
+            const errData = await res.json();
+            if (errData && errData.error) message = errData.error;
+          } catch (parseErr) {
+            // server returned a non-JSON error page (e.g. a gateway error) —
+            // keep the generic status message instead of a raw parse error
+          }
+          throw new Error(message);
         }
 
+        const data = await res.json();
         renderReport(data);
         hide(statusBox);
         show(reportBox);
