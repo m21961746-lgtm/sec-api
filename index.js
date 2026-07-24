@@ -522,6 +522,23 @@ function paragraphsToHtml(text) {
     .join("\n");
 }
 
+// Build a search-snippet description from the AI summary: strip any HTML,
+// collapse whitespace, and truncate at a word boundary (not mid-word).
+function summaryToMetaDescription(text, maxLength = 150) {
+  if (!text) return null;
+  const plain = String(text)
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!plain) return null;
+  if (plain.length <= maxLength) return plain;
+
+  const truncated = plain.slice(0, maxLength);
+  const lastSpace = truncated.lastIndexOf(" ");
+  const clipped = lastSpace > 0 ? truncated.slice(0, lastSpace) : truncated;
+  return clipped.trim() + "…";
+}
+
 app.get("/company/:ticker", async (req, res) => {
   const T = String(req.params.ticker || "").toUpperCase();
 
@@ -577,8 +594,10 @@ app.get("/company/:ticker", async (req, res) => {
         `You can look up this company directly on <a href="/">Zelothorn</a>.</p>`;
 
     const title = `What does ${companyName} do? | ${T} explained | Zelothorn`;
-    const metaDesc = `A plain-English explanation of what ${companyName} (${T}) does, ` +
+    const fallbackDesc = `A plain-language explanation of what ${companyName} (${T}) does, ` +
       `how it makes money, and how its latest earnings compared to expectations.`;
+    const metaDesc = summaryToMetaDescription(aiSummary) || fallbackDesc;
+    const canonicalUrl = `https://zelothorn.com/company/${escapeHtml(T)}`;
 
     const html =
 `<!DOCTYPE html>
@@ -588,7 +607,11 @@ app.get("/company/:ticker", async (req, res) => {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)}</title>
 <meta name="description" content="${escapeHtml(metaDesc)}">
-<link rel="canonical" href="https://zelothorn.com/company/${escapeHtml(T)}">
+<meta property="og:type" content="website">
+<meta property="og:url" content="${canonicalUrl}">
+<meta property="og:title" content="${escapeHtml(title)}">
+<meta property="og:description" content="${escapeHtml(metaDesc)}">
+<link rel="canonical" href="${canonicalUrl}">
 <style>
   body{font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
        max-width:760px;margin:0 auto;padding:32px 20px;line-height:1.6;color:#1a1a1a;}
