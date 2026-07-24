@@ -507,12 +507,15 @@ app.get("/company/:ticker", async (req, res) => {
     const entry = map[T];
 
     if (!entry) {
+      const missingSubject = encodeURIComponent(`Missing: ${T}`);
       return res.status(404).send(
         `<!DOCTYPE html><html><head><meta charset="utf-8">` +
         `<title>Company not found | Zelothorn</title></head><body>` +
         `<h1>We couldn't find that company</h1>` +
         `<p>No U.S. public company was found for the symbol "${escapeHtml(T)}".</p>` +
-        `<p><a href="/">Back to Zelothorn</a></p></body></html>`
+        `<p><a href="/">Back to Zelothorn</a></p>` +
+        `<p><a href="mailto:zelothornsupport@gmail.com?subject=${missingSubject}" style="color:#888;font-size:.85rem;text-decoration:none;">Looking for a company we don't cover? Tell us which one →</a></p>` +
+        `</body></html>`
       );
     }
 
@@ -566,6 +569,9 @@ app.get("/company/:ticker", async (req, res) => {
   .cta{display:inline-block;margin:24px 0;padding:12px 20px;background:#111;color:#fff;
        text-decoration:none;border-radius:8px;}
   .disc{color:#888;font-size:.85rem;margin-top:40px;border-top:1px solid #eee;padding-top:16px;}
+  .footer-feedback{margin-top:10px;}
+  .feedback-link{color:#888;font-size:.8rem;text-decoration:none;}
+  .feedback-link:hover{text-decoration:underline;}
   a{color:#0b5;}
 </style>
 </head>
@@ -578,6 +584,7 @@ app.get("/company/:ticker", async (req, res) => {
   <p class="disc">Zelothorn provides AI-generated explanations and official public data for
   educational purposes only. It is not financial advice and does not recommend buying or
   selling any security.</p>
+  <p class="footer-feedback"><a class="feedback-link" href="mailto:zelothornsupport@gmail.com?subject=${encodeURIComponent('Feedback: ' + T)}">Was this explanation clear? Tell us what was confusing →</a></p>
 </body>
 </html>`;
 
