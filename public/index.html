@@ -374,6 +374,60 @@
       text-decoration: none;
     }
     .feedback-link:hover { color: var(--accent-ink); text-decoration: underline; }
+
+    .feedback-form {
+      max-width: 380px;
+      margin: 0 auto 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .feedback-form textarea {
+      width: 100%;
+      box-sizing: border-box;
+      resize: vertical;
+      min-height: 42px;
+      font-family: inherit;
+      font-size: 12.5px;
+      color: var(--ink);
+      background: #f7f6f9;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px 10px;
+    }
+    .feedback-row { display: flex; gap: 6px; }
+    .feedback-row input[type="email"] {
+      flex: 1;
+      box-sizing: border-box;
+      font-family: inherit;
+      font-size: 12px;
+      color: var(--ink);
+      background: #f7f6f9;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 6px 10px;
+    }
+    .feedback-row button {
+      border: none;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 12.5px;
+      font-weight: 600;
+      padding: 6px 14px;
+      border-radius: 8px;
+      background: var(--accent);
+      color: var(--accent-ink);
+    }
+    .feedback-row button:hover { filter: brightness(0.97); }
+    .feedback-row button:disabled { opacity: 0.55; cursor: default; }
+    .feedback-status {
+      font-size: 12px;
+      min-height: 14px;
+      margin: 0;
+      color: var(--muted);
+    }
+    .feedback-status.success { color: #2f8f5b; }
+    .feedback-status.error { color: #9c4b4b; }
   </style>
 </head>
 <body>
@@ -431,7 +485,18 @@
     </div>
 
     <footer class="site-footer">
-      <a class="feedback-link" href="mailto:zelothornsupport@gmail.com?subject=Feedback%3A%20Zelothorn">Was this explanation clear? Tell us what was confusing →</a>
+      <form class="feedback-form" id="feedbackForm">
+        <textarea id="feedbackMessage" name="message" rows="2" required
+          placeholder="Was this explanation clear? Tell us what was confusing."></textarea>
+        <div class="feedback-row">
+          <input type="email" id="feedbackEmail" name="email" placeholder="Your email (optional)" />
+          <button type="submit" id="feedbackSubmit">Send</button>
+        </div>
+        <input type="hidden" name="page" value="homepage" />
+        <input type="text" name="_gotcha" style="display:none" tabindex="-1" autocomplete="off" />
+        <p class="feedback-status" id="feedbackStatus"></p>
+      </form>
+      <a class="feedback-link" href="mailto:zelothornsupport@gmail.com?subject=Feedback%3A%20Zelothorn">Or email us directly →</a>
     </footer>
   </div>
 
@@ -710,6 +775,41 @@
 
     document.getElementById("ticker").addEventListener("keydown", function (e) {
       if (e.key === "Enter") getReport();
+    });
+
+    // Feedback form (Formspree, AJAX submit)
+    const FORMSPREE_ENDPOINT = "https://formspree.io/f/mqergkqo";
+    const feedbackForm = document.getElementById("feedbackForm");
+    const feedbackStatus = document.getElementById("feedbackStatus");
+    const feedbackSubmit = document.getElementById("feedbackSubmit");
+
+    feedbackForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      feedbackSubmit.disabled = true;
+      feedbackStatus.textContent = "";
+      feedbackStatus.className = "feedback-status";
+
+      try {
+        const res = await fetch(FORMSPREE_ENDPOINT, {
+          method: "POST",
+          headers: { "Accept": "application/json" },
+          body: new FormData(feedbackForm)
+        });
+
+        if (res.ok) {
+          feedbackForm.reset();
+          feedbackStatus.textContent = "Thanks for the feedback!";
+          feedbackStatus.className = "feedback-status success";
+        } else {
+          feedbackStatus.textContent = "Couldn't send that — please try again or email us.";
+          feedbackStatus.className = "feedback-status error";
+        }
+      } catch (err) {
+        feedbackStatus.textContent = "Couldn't send that — please try again or email us.";
+        feedbackStatus.className = "feedback-status error";
+      } finally {
+        feedbackSubmit.disabled = false;
+      }
     });
   </script>
 </body>

@@ -624,6 +624,20 @@ app.get("/company/:ticker", async (req, res) => {
   .footer-feedback{margin-top:10px;}
   .feedback-link{color:#888;font-size:.8rem;text-decoration:none;}
   .feedback-link:hover{text-decoration:underline;}
+  .feedback-form{max-width:380px;margin:16px auto 6px;display:flex;flex-direction:column;gap:6px;}
+  .feedback-form textarea{width:100%;box-sizing:border-box;resize:vertical;min-height:42px;
+       font-family:inherit;font-size:.8rem;color:#1a1a1a;background:#f7f6f9;
+       border:1px solid #eee;border-radius:8px;padding:8px 10px;}
+  .feedback-row{display:flex;gap:6px;}
+  .feedback-row input[type="email"]{flex:1;box-sizing:border-box;font-family:inherit;font-size:.75rem;
+       color:#1a1a1a;background:#f7f6f9;border:1px solid #eee;border-radius:8px;padding:6px 10px;}
+  .feedback-row button{border:none;cursor:pointer;font-family:inherit;font-size:.8rem;font-weight:600;
+       padding:6px 14px;border-radius:8px;background:#eee;color:#333;}
+  .feedback-row button:hover{background:#e2e2e2;}
+  .feedback-row button:disabled{opacity:.55;cursor:default;}
+  .feedback-status{font-size:.75rem;min-height:14px;margin:0;color:#888;}
+  .feedback-status.success{color:#2f8f5b;}
+  .feedback-status.error{color:#9c4b4b;}
   a{color:#0b5;}
 </style>
 </head>
@@ -636,7 +650,52 @@ app.get("/company/:ticker", async (req, res) => {
   <p class="disc">Zelothorn provides AI-generated explanations and official public data for
   educational purposes only. It is not financial advice and does not recommend buying or
   selling any security.</p>
-  <p class="footer-feedback"><a class="feedback-link" href="mailto:zelothornsupport@gmail.com?subject=${encodeURIComponent('Feedback: ' + T)}">Was this explanation clear? Tell us what was confusing →</a></p>
+  <form class="feedback-form" id="feedbackForm">
+    <textarea id="feedbackMessage" name="message" rows="2" required
+      placeholder="Was this explanation clear? Tell us what was confusing."></textarea>
+    <div class="feedback-row">
+      <input type="email" id="feedbackEmail" name="email" placeholder="Your email (optional)">
+      <button type="submit" id="feedbackSubmit">Send</button>
+    </div>
+    <input type="hidden" name="page" value="${escapeHtml(T)}">
+    <input type="text" name="_gotcha" style="display:none" tabindex="-1" autocomplete="off">
+    <p class="feedback-status" id="feedbackStatus"></p>
+  </form>
+  <p class="footer-feedback"><a class="feedback-link" href="mailto:zelothornsupport@gmail.com?subject=${encodeURIComponent('Feedback: ' + T)}">Or email us directly →</a></p>
+  <script>
+    const feedbackForm = document.getElementById("feedbackForm");
+    const feedbackStatus = document.getElementById("feedbackStatus");
+    const feedbackSubmit = document.getElementById("feedbackSubmit");
+
+    feedbackForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      feedbackSubmit.disabled = true;
+      feedbackStatus.textContent = "";
+      feedbackStatus.className = "feedback-status";
+
+      try {
+        const res = await fetch("https://formspree.io/f/mqergkqo", {
+          method: "POST",
+          headers: { "Accept": "application/json" },
+          body: new FormData(feedbackForm)
+        });
+
+        if (res.ok) {
+          feedbackForm.reset();
+          feedbackStatus.textContent = "Thanks for the feedback!";
+          feedbackStatus.className = "feedback-status success";
+        } else {
+          feedbackStatus.textContent = "Couldn't send that — please try again or email us.";
+          feedbackStatus.className = "feedback-status error";
+        }
+      } catch (err) {
+        feedbackStatus.textContent = "Couldn't send that — please try again or email us.";
+        feedbackStatus.className = "feedback-status error";
+      } finally {
+        feedbackSubmit.disabled = false;
+      }
+    });
+  </script>
 </body>
 </html>`;
 
