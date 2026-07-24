@@ -12,6 +12,35 @@ app.use(cors());
 app.use(express.json());
 
 /* =========================
+   HEALTH CHECK
+   Must be registered before the canonical-domain redirect below,
+   so Render's health checker (which hits the service on its
+   onrender.com hostname, not zelothorn.com) always gets a 200
+   instead of being redirected.
+   ========================= */
+app.get("/healthz", (req, res) => {
+  res.status(200).send("ok");
+});
+
+/* =========================
+   CANONICAL DOMAIN REDIRECT
+   Google was indexing both zelothorn.com and the Render default
+   domain, splitting ranking signals. Force everything onto the
+   custom domain with a permanent redirect. Skipped outside
+   production so localhost doesn't get redirected during dev.
+   ========================= */
+const CANONICAL_HOST = "zelothorn.com";
+
+if (process.env.NODE_ENV === "production") {
+  app.use((req, res, next) => {
+    if (req.hostname !== CANONICAL_HOST) {
+      return res.redirect(301, `https://${CANONICAL_HOST}${req.originalUrl}`);
+    }
+    next();
+  });
+}
+
+/* =========================
    SERVE THE FRONTEND
    ========================= */
 app.use(express.static(path.join(__dirname, "public")));
