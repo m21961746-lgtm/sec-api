@@ -187,6 +187,34 @@
       text-overflow: ellipsis;
     }
 
+    .intro {
+      background: var(--card);
+      border-radius: 18px;
+      padding: 20px 24px;
+      box-shadow: 0 10px 40px rgba(80, 70, 90, 0.08);
+      margin-bottom: 26px;
+    }
+    .intro-heading {
+      font-family: "Playfair Display", serif;
+      font-weight: 600;
+      font-size: 19px;
+      line-height: 1.4;
+      margin: 0 0 8px;
+      color: var(--ink);
+    }
+    .intro-text {
+      font-size: 14px;
+      line-height: 1.6;
+      color: var(--muted);
+      margin: 0 0 10px;
+    }
+    .intro-brand {
+      font-size: 13.5px;
+      font-weight: 600;
+      color: var(--accent-ink);
+      margin: 0;
+    }
+
     .status {
       text-align: center;
       color: var(--muted);
@@ -440,6 +468,12 @@
     <div class="search">
       <input id="ticker" placeholder="Company name or ticker  ·  e.g. Disney, AAPL" autocomplete="off" spellcheck="false" />
       <button id="go" onclick="getReport()">Get Report</button>
+    </div>
+
+    <div class="intro">
+      <h2 class="intro-heading">New here? Zelothorn explains public companies in plain language — no finance degree required.</h2>
+      <p class="intro-text">Type any company name or ticker above to see what it does, what a stock is, how its latest earnings compared to expectations, and its official SEC filings — each explained simply.</p>
+      <p class="intro-brand">We explain what's already public. No ratings, no price targets, no buy or sell advice — ever.</p>
     </div>
 
     <div class="quick">
