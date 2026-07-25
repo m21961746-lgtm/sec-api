@@ -548,6 +548,9 @@
     buildQuickGrid();
 
     // Plain-English names + short descriptions for common SEC filing codes
+    // NOTE: this object is duplicated server-side in index.js (FORM_INFO,
+    // used by the /company/:ticker SEO pages). If you edit these labels,
+    // update both copies so the wording doesn't drift apart.
     const FORM_INFO = {
       "10-K":    { name: "Annual report",        desc: "The company's big yearly financial report." },
       "10-Q":    { name: "Quarterly report",     desc: "A financial update covering the last 3 months." },

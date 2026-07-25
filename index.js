@@ -539,6 +539,67 @@ function summaryToMetaDescription(text, maxLength = 150) {
   return clipped.trim() + "…";
 }
 
+// Plain-English names + short descriptions for common SEC filing codes.
+// NOTE: this is duplicated from FORM_INFO in public/index.html (used by
+// the homepage's client-side filings rendering). If you edit these
+// labels, update both copies so the wording doesn't drift apart.
+const FORM_INFO = {
+  "10-K":    { name: "Annual report",        desc: "The company's big yearly financial report." },
+  "10-Q":    { name: "Quarterly report",     desc: "A financial update covering the last 3 months." },
+  "8-K":     { name: "Material event",       desc: "A heads-up about something important that just happened." },
+  "4":       { name: "Insider trade",        desc: "An executive or director bought or sold company shares." },
+  "3":       { name: "Insider ownership",    desc: "A new insider's first report of the shares they hold." },
+  "5":       { name: "Insider annual summary",desc: "A yearly wrap-up of an insider's share activity." },
+  "SD":      { name: "Specialized disclosure",desc: "A required disclosure (e.g. on sourcing of minerals)." },
+  "DEF 14A": { name: "Proxy statement",      desc: "Info for shareholders ahead of a vote." },
+  "S-1":     { name: "New share registration",desc: "Paperwork to offer new shares (often an IPO)." },
+  "S-8":     { name: "Employee share plan",  desc: "Registering shares offered to employees." },
+  "144":     { name: "Proposed share sale",  desc: "Notice that an insider plans to sell some shares." },
+  "SC 13G":  { name: "Large shareholder",    desc: "A big investor reporting a sizable stake." },
+  "SC 13D":  { name: "Activist shareholder", desc: "A big investor with intentions to influence the company." }
+};
+
+function formInfo(form) {
+  return FORM_INFO[form] || { name: "SEC filing", desc: "An official filing with the SEC." };
+}
+
+// Render one filing as a linked row, matching the homepage's filing card markup.
+function filingRowHtml(f) {
+  const info = formInfo(f.form);
+  return (
+    `<a class="filing" href="${escapeHtml(f.url || "#")}" target="_blank" rel="noopener">` +
+    `<div><span class="filing-name">${escapeHtml(info.name)}</span> ` +
+    `<span class="filing-code">(${escapeHtml(f.form)})</span>` +
+    `<div class="filing-desc">${escapeHtml(info.desc)}</div></div>` +
+    `<div class="filing-date">${escapeHtml(f.filingDate)}</div>` +
+    `</a>`
+  );
+}
+
+// Render the "Key filings" + "Most recent filings" groups, matching the
+// homepage's layout, from the filingsData the handler already fetched.
+function renderFilingsHtml(filingsData) {
+  let html = "";
+
+  if (filingsData.key && filingsData.key.length) {
+    html +=
+      `<div class="filing-group">` +
+      `<div class="subhead">Key filings</div>` +
+      filingsData.key.map(filingRowHtml).join("") +
+      `</div>`;
+  }
+
+  if (filingsData.recent && filingsData.recent.length) {
+    html +=
+      `<div class="filing-group">` +
+      `<div class="subhead">Most recent filings</div>` +
+      filingsData.recent.map(filingRowHtml).join("") +
+      `</div>`;
+  }
+
+  return html;
+}
+
 app.get("/company/:ticker", async (req, res) => {
   const T = String(req.params.ticker || "").toUpperCase();
 
@@ -593,6 +654,8 @@ app.get("/company/:ticker", async (req, res) => {
       : `<p>A plain-language overview for ${escapeHtml(companyName)} is being prepared. ` +
         `You can look up this company directly on <a href="/">Zelothorn</a>.</p>`;
 
+    const filingsHtml = renderFilingsHtml(filingsData);
+
     const title = `What does ${companyName} do? | ${T} explained | Zelothorn`;
     const fallbackDesc = `A plain-language explanation of what ${companyName} (${T}) does, ` +
       `how it makes money, and how its latest earnings compared to expectations.`;
@@ -621,6 +684,17 @@ app.get("/company/:ticker", async (req, res) => {
   .cta{display:inline-block;margin:24px 0;padding:12px 20px;background:#111;color:#fff;
        text-decoration:none;border-radius:8px;}
   .disc{color:#888;font-size:.85rem;margin-top:40px;border-top:1px solid #eee;padding-top:16px;}
+  .filing-group{margin-bottom:22px;}
+  .filing-group:last-child{margin-bottom:0;}
+  .subhead{font-size:.8rem;font-weight:600;color:#1a1a1a;margin:4px 0 4px;}
+  .filing{display:flex;justify-content:space-between;align-items:baseline;gap:14px;
+       padding:13px 0;border-bottom:1px solid #eee;text-decoration:none;}
+  .filing:last-child{border-bottom:none;}
+  .filing:hover .filing-name{text-decoration:underline;}
+  .filing-name{font-weight:500;color:#1a1a1a;font-size:.95rem;}
+  .filing-code{color:#888;font-size:.75rem;}
+  .filing-desc{color:#888;font-size:.8rem;margin-top:2px;}
+  .filing-date{color:#888;font-size:.85rem;white-space:nowrap;}
   .footer-feedback{margin-top:10px;}
   .feedback-link{color:#888;font-size:.8rem;text-decoration:none;}
   .feedback-link:hover{text-decoration:underline;}
@@ -646,6 +720,9 @@ app.get("/company/:ticker", async (req, res) => {
   <p class="sub">${escapeHtml(T)} &middot; Plain-English company overview</p>
   ${summaryHtml}
   ${earningsHtml}
+  <h2>SEC Filings</h2>
+  ${filingsHtml}
+  <a href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${entry.cik}&type=&dateb=&owner=include&count=40" target="_blank" rel="noopener">View all filings on SEC.gov &rarr;</a>
   <a class="cta" href="/">Look up any company on Zelothorn &rarr;</a>
   <p class="disc">Zelothorn provides AI-generated explanations and official public data for
   educational purposes only. It is not financial advice and does not recommend buying or
