@@ -600,6 +600,107 @@ function renderFilingsHtml(filingsData) {
   return html;
 }
 
+// Shared page chrome for server-rendered pages (/company/:ticker and
+// /learn/*): fonts, colors, layout, and the feedback-form/filing styles.
+// Kept as one constant so these pages can't visually drift apart.
+const PAGE_STYLE = `
+  body{font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+       max-width:760px;margin:0 auto;padding:32px 20px;line-height:1.6;color:#1a1a1a;}
+  h1{font-size:1.9rem;margin-bottom:.2em;}
+  h2{font-size:1.3rem;margin-top:1.6em;}
+  .sub{color:#666;margin-top:0;}
+  .term-note{color:#888;font-size:.8rem;margin:8px 0 14px;}
+  .cta{display:inline-block;margin:24px 0;padding:12px 20px;background:#111;color:#fff;
+       text-decoration:none;border-radius:8px;}
+  .disc{color:#888;font-size:.85rem;margin-top:40px;border-top:1px solid #eee;padding-top:16px;}
+  .brand-line{font-weight:600;color:#5a4750;margin:20px 0 0;}
+  .filing-group{margin-bottom:22px;}
+  .filing-group:last-child{margin-bottom:0;}
+  .subhead{font-size:.8rem;font-weight:600;color:#1a1a1a;margin:4px 0 4px;}
+  .filing{display:flex;justify-content:space-between;align-items:baseline;gap:14px;
+       padding:13px 0;border-bottom:1px solid #eee;text-decoration:none;}
+  .filing:last-child{border-bottom:none;}
+  .filing:hover .filing-name{text-decoration:underline;}
+  .filing-name{font-weight:500;color:#1a1a1a;font-size:.95rem;}
+  .filing-code{color:#888;font-size:.75rem;}
+  .filing-desc{color:#888;font-size:.8rem;margin-top:2px;}
+  .filing-date{color:#888;font-size:.85rem;white-space:nowrap;}
+  .footer-feedback{margin-top:10px;}
+  .feedback-link{color:#888;font-size:.8rem;text-decoration:none;}
+  .feedback-link:hover{text-decoration:underline;}
+  .feedback-form{max-width:380px;margin:16px auto 6px;display:flex;flex-direction:column;gap:6px;}
+  .feedback-form textarea{width:100%;box-sizing:border-box;resize:vertical;min-height:42px;
+       font-family:inherit;font-size:.8rem;color:#1a1a1a;background:#f7f6f9;
+       border:1px solid #eee;border-radius:8px;padding:8px 10px;}
+  .feedback-row{display:flex;gap:6px;}
+  .feedback-row input[type="email"]{flex:1;box-sizing:border-box;font-family:inherit;font-size:.75rem;
+       color:#1a1a1a;background:#f7f6f9;border:1px solid #eee;border-radius:8px;padding:6px 10px;}
+  .feedback-row button{border:none;cursor:pointer;font-family:inherit;font-size:.8rem;font-weight:600;
+       padding:6px 14px;border-radius:8px;background:#eee;color:#333;}
+  .feedback-row button:hover{background:#e2e2e2;}
+  .feedback-row button:disabled{opacity:.55;cursor:default;}
+  .feedback-status{font-size:.75rem;min-height:14px;margin:0;color:#888;}
+  .feedback-status.success{color:#2f8f5b;}
+  .feedback-status.error{color:#9c4b4b;}
+  a{color:#0b5;}
+`;
+
+// Shared feedback form + Formspree submit script, used on every
+// server-rendered page. pageId fills the hidden "page" field (a machine
+// ID, e.g. a ticker or "learn:what-is-a-10-k"); label is the human-
+// readable text used in the mailto fallback's subject line, defaulting
+// to pageId when it's already readable (e.g. a ticker).
+function feedbackFormHtml(pageId, label = pageId) {
+  const subject = encodeURIComponent(`Feedback: ${label}`);
+  return `
+  <form class="feedback-form" id="feedbackForm">
+    <textarea id="feedbackMessage" name="message" rows="2" required
+      placeholder="Was this explanation clear? Tell us what was confusing."></textarea>
+    <div class="feedback-row">
+      <input type="email" id="feedbackEmail" name="email" placeholder="Your email (optional)">
+      <button type="submit" id="feedbackSubmit">Send</button>
+    </div>
+    <input type="hidden" name="page" value="${escapeHtml(pageId)}">
+    <input type="text" name="_gotcha" style="display:none" tabindex="-1" autocomplete="off">
+    <p class="feedback-status" id="feedbackStatus"></p>
+  </form>
+  <p class="footer-feedback"><a class="feedback-link" href="mailto:zelothornsupport@gmail.com?subject=${subject}">Or email us directly →</a></p>
+  <script>
+    const feedbackForm = document.getElementById("feedbackForm");
+    const feedbackStatus = document.getElementById("feedbackStatus");
+    const feedbackSubmit = document.getElementById("feedbackSubmit");
+
+    feedbackForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      feedbackSubmit.disabled = true;
+      feedbackStatus.textContent = "";
+      feedbackStatus.className = "feedback-status";
+
+      try {
+        const res = await fetch("https://formspree.io/f/mqergkqo", {
+          method: "POST",
+          headers: { "Accept": "application/json" },
+          body: new FormData(feedbackForm)
+        });
+
+        if (res.ok) {
+          feedbackForm.reset();
+          feedbackStatus.textContent = "Thanks for the feedback!";
+          feedbackStatus.className = "feedback-status success";
+        } else {
+          feedbackStatus.textContent = "Couldn't send that — please try again or email us.";
+          feedbackStatus.className = "feedback-status error";
+        }
+      } catch (err) {
+        feedbackStatus.textContent = "Couldn't send that — please try again or email us.";
+        feedbackStatus.className = "feedback-status error";
+      } finally {
+        feedbackSubmit.disabled = false;
+      }
+    });
+  </script>`;
+}
+
 app.get("/company/:ticker", async (req, res) => {
   const T = String(req.params.ticker || "").toUpperCase();
 
@@ -678,46 +779,7 @@ app.get("/company/:ticker", async (req, res) => {
 <meta property="og:title" content="${escapeHtml(title)}">
 <meta property="og:description" content="${escapeHtml(metaDesc)}">
 <link rel="canonical" href="${canonicalUrl}">
-<style>
-  body{font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
-       max-width:760px;margin:0 auto;padding:32px 20px;line-height:1.6;color:#1a1a1a;}
-  h1{font-size:1.9rem;margin-bottom:.2em;}
-  h2{font-size:1.3rem;margin-top:1.6em;}
-  .sub{color:#666;margin-top:0;}
-  .term-note{color:#888;font-size:.8rem;margin:8px 0 14px;}
-  .cta{display:inline-block;margin:24px 0;padding:12px 20px;background:#111;color:#fff;
-       text-decoration:none;border-radius:8px;}
-  .disc{color:#888;font-size:.85rem;margin-top:40px;border-top:1px solid #eee;padding-top:16px;}
-  .filing-group{margin-bottom:22px;}
-  .filing-group:last-child{margin-bottom:0;}
-  .subhead{font-size:.8rem;font-weight:600;color:#1a1a1a;margin:4px 0 4px;}
-  .filing{display:flex;justify-content:space-between;align-items:baseline;gap:14px;
-       padding:13px 0;border-bottom:1px solid #eee;text-decoration:none;}
-  .filing:last-child{border-bottom:none;}
-  .filing:hover .filing-name{text-decoration:underline;}
-  .filing-name{font-weight:500;color:#1a1a1a;font-size:.95rem;}
-  .filing-code{color:#888;font-size:.75rem;}
-  .filing-desc{color:#888;font-size:.8rem;margin-top:2px;}
-  .filing-date{color:#888;font-size:.85rem;white-space:nowrap;}
-  .footer-feedback{margin-top:10px;}
-  .feedback-link{color:#888;font-size:.8rem;text-decoration:none;}
-  .feedback-link:hover{text-decoration:underline;}
-  .feedback-form{max-width:380px;margin:16px auto 6px;display:flex;flex-direction:column;gap:6px;}
-  .feedback-form textarea{width:100%;box-sizing:border-box;resize:vertical;min-height:42px;
-       font-family:inherit;font-size:.8rem;color:#1a1a1a;background:#f7f6f9;
-       border:1px solid #eee;border-radius:8px;padding:8px 10px;}
-  .feedback-row{display:flex;gap:6px;}
-  .feedback-row input[type="email"]{flex:1;box-sizing:border-box;font-family:inherit;font-size:.75rem;
-       color:#1a1a1a;background:#f7f6f9;border:1px solid #eee;border-radius:8px;padding:6px 10px;}
-  .feedback-row button{border:none;cursor:pointer;font-family:inherit;font-size:.8rem;font-weight:600;
-       padding:6px 14px;border-radius:8px;background:#eee;color:#333;}
-  .feedback-row button:hover{background:#e2e2e2;}
-  .feedback-row button:disabled{opacity:.55;cursor:default;}
-  .feedback-status{font-size:.75rem;min-height:14px;margin:0;color:#888;}
-  .feedback-status.success{color:#2f8f5b;}
-  .feedback-status.error{color:#9c4b4b;}
-  a{color:#0b5;}
-</style>
+<style>${PAGE_STYLE}</style>
 </head>
 <body>
   <h1>What does ${escapeHtml(companyName)} do?</h1>
@@ -732,52 +794,7 @@ app.get("/company/:ticker", async (req, res) => {
   <p class="disc">Zelothorn provides AI-generated explanations and official public data for
   educational purposes only. It is not financial advice and does not recommend buying or
   selling any security.</p>
-  <form class="feedback-form" id="feedbackForm">
-    <textarea id="feedbackMessage" name="message" rows="2" required
-      placeholder="Was this explanation clear? Tell us what was confusing."></textarea>
-    <div class="feedback-row">
-      <input type="email" id="feedbackEmail" name="email" placeholder="Your email (optional)">
-      <button type="submit" id="feedbackSubmit">Send</button>
-    </div>
-    <input type="hidden" name="page" value="${escapeHtml(T)}">
-    <input type="text" name="_gotcha" style="display:none" tabindex="-1" autocomplete="off">
-    <p class="feedback-status" id="feedbackStatus"></p>
-  </form>
-  <p class="footer-feedback"><a class="feedback-link" href="mailto:zelothornsupport@gmail.com?subject=${encodeURIComponent('Feedback: ' + T)}">Or email us directly →</a></p>
-  <script>
-    const feedbackForm = document.getElementById("feedbackForm");
-    const feedbackStatus = document.getElementById("feedbackStatus");
-    const feedbackSubmit = document.getElementById("feedbackSubmit");
-
-    feedbackForm.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      feedbackSubmit.disabled = true;
-      feedbackStatus.textContent = "";
-      feedbackStatus.className = "feedback-status";
-
-      try {
-        const res = await fetch("https://formspree.io/f/mqergkqo", {
-          method: "POST",
-          headers: { "Accept": "application/json" },
-          body: new FormData(feedbackForm)
-        });
-
-        if (res.ok) {
-          feedbackForm.reset();
-          feedbackStatus.textContent = "Thanks for the feedback!";
-          feedbackStatus.className = "feedback-status success";
-        } else {
-          feedbackStatus.textContent = "Couldn't send that — please try again or email us.";
-          feedbackStatus.className = "feedback-status error";
-        }
-      } catch (err) {
-        feedbackStatus.textContent = "Couldn't send that — please try again or email us.";
-        feedbackStatus.className = "feedback-status error";
-      } finally {
-        feedbackSubmit.disabled = false;
-      }
-    });
-  </script>
+  ${feedbackFormHtml(T)}
 </body>
 </html>`;
 
@@ -793,6 +810,90 @@ app.get("/company/:ticker", async (req, res) => {
       `</body></html>`
     );
   }
+});
+
+/* ===================================================
+   LEARN PAGES
+   Static, human-authored educational content - no SEC/Finnhub
+   calls, no per-request caching needed.
+   =================================================== */
+app.get("/learn/what-is-a-10-k", (req, res) => {
+  const title = "What is a 10-K? Plain-English Guide | Zelothorn";
+  const metaDesc = "What a 10-K is, what's inside it (Business, Risk Factors, MD&A, " +
+    "Financials), when it's filed, and why it matters — explained in plain language.";
+  const canonicalUrl = "https://zelothorn.com/learn/what-is-a-10-k";
+
+  const html =
+`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(title)}</title>
+<meta name="description" content="${escapeHtml(metaDesc)}">
+<meta property="og:type" content="website">
+<meta property="og:url" content="${canonicalUrl}">
+<meta property="og:title" content="${escapeHtml(title)}">
+<meta property="og:description" content="${escapeHtml(metaDesc)}">
+<link rel="canonical" href="${canonicalUrl}">
+<style>${PAGE_STYLE}</style>
+</head>
+<body>
+  <h1>What is a 10-K? A plain-English guide</h1>
+  <p class="sub">The short version: The 10-K is the big one — a company's official annual
+  filing with the SEC. No marketing, no spin, everything on the record. If a company filed
+  only one document a year, this would be it.</p>
+
+  <h2>What it is</h2>
+  <p>The 10-K is the complete annual report a public company files with the SEC each year.
+  Not the glossy shareholder version with the CEO's letter and stock photos — the legally
+  binding one, audited and detailed, where every claim is on the record. The difference
+  matters: a press release is marketing, a 10-K is testimony. Misstating a 10-K is
+  securities fraud.</p>
+
+  <h2>When it's filed</h2>
+  <p>Once a year, after the fiscal year closes. Large companies ("large accelerated
+  filers") have 60 days; smaller ones get 75 or 90. A December fiscal year-end means a
+  10-K landing in the first quarter.</p>
+
+  <h2>What's inside</h2>
+  <p><strong>Item 1 — Business.</strong> What the company does, its segments, products,
+  and how revenue is actually generated. Often the single clearest description of a
+  company that exists.</p>
+  <p><strong>Item 1A — Risk Factors.</strong> Every material risk the company will admit
+  to, in writing. Competition, litigation, concentration, leverage. Read alongside last
+  year's, the changes are the interesting part.</p>
+  <p><strong>Item 7 — MD&amp;A.</strong> Management's own narrative on the year's
+  results — what moved, and their explanation of why.</p>
+  <p><strong>Item 8 — Financial Statements.</strong> The audited numbers: income
+  statement, balance sheet, cash flows, and the footnotes (where the real detail
+  hides).</p>
+
+  <h2>Why it matters</h2>
+  <p>It's the primary source. Everything downstream — news, analysis, hot takes — is
+  someone's interpretation of what's in here. The 10-K is the thing itself, free and
+  public, the same document the analysts read before they have an opinion.</p>
+  <p>The only problem is the format: a hundred-plus pages of legal prose nobody enjoys.
+  That's Zelothorn's job — the plain-language version, with a direct link to the real
+  filing.</p>
+
+  <h2>See a real one</h2>
+  <p>Each explained plainly, linked to the official document:<br>
+  <a href="/company/AAPL">Apple</a> &middot; <a href="/company/MSFT">Microsoft</a> &middot;
+  <a href="/company/TSLA">Tesla</a></p>
+
+  <p class="brand-line">Zelothorn explains what's already public. No ratings, no price
+  targets, no buy or sell advice — ever.</p>
+
+  <p class="disc">Zelothorn provides plain-language educational explanations and links to
+  official public data for educational purposes only. It is not financial advice and does
+  not recommend buying or selling any security.</p>
+
+  ${feedbackFormHtml("learn:what-is-a-10-k", "What is a 10-K?")}
+</body>
+</html>`;
+
+  res.send(html);
 });
 
 
@@ -835,6 +936,7 @@ app.get("/sitemap.xml", async (req, res) => {
 `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url><loc>${base}/</loc></url>
+  <url><loc>${base}/learn/what-is-a-10-k</loc></url>
 ${urls}
 </urlset>`;
 
