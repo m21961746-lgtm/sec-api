@@ -643,6 +643,9 @@ app.get("/company/:ticker", async (req, res) => {
       const verb = L.result === "beat" ? "beat" : (L.result === "miss" ? "missed" : "met");
       earningsHtml =
         `<h2>How did ${escapeHtml(companyName)}'s latest earnings compare?</h2>` +
+        `<p class="term-note">An earnings release is a company's quarterly report of how much ` +
+        `money it made. Analysts predict these numbers ahead of time, and the actual results are ` +
+        `compared against those predictions.</p>` +
         `<p>In the most recent quarter (${escapeHtml(L.period)}), ${escapeHtml(companyName)} ` +
         `reported earnings of $${escapeHtml(L.actualEPS)} per share. Analysts expected ` +
         `$${escapeHtml(L.estimateEPS)} per share, so the company <strong>${verb}</strong> ` +
@@ -681,6 +684,7 @@ app.get("/company/:ticker", async (req, res) => {
   h1{font-size:1.9rem;margin-bottom:.2em;}
   h2{font-size:1.3rem;margin-top:1.6em;}
   .sub{color:#666;margin-top:0;}
+  .term-note{color:#888;font-size:.8rem;margin:8px 0 14px;}
   .cta{display:inline-block;margin:24px 0;padding:12px 20px;background:#111;color:#fff;
        text-decoration:none;border-radius:8px;}
   .disc{color:#888;font-size:.85rem;margin-top:40px;border-top:1px solid #eee;padding-top:16px;}
@@ -719,6 +723,7 @@ app.get("/company/:ticker", async (req, res) => {
   <h1>What does ${escapeHtml(companyName)} do?</h1>
   <p class="sub">${escapeHtml(T)} &middot; Plain-English company overview</p>
   ${summaryHtml}
+  <p class="term-note">A stock is a share of ownership in a company. Owning one means you own a small piece of that business.</p>
   ${earningsHtml}
   <h2>SEC Filings</h2>
   ${filingsHtml}
