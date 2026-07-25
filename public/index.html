@@ -287,6 +287,13 @@
     }
     .summary p:last-child { margin-bottom: 0; }
 
+    .term-note {
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.5;
+      margin: 0 0 12px;
+    }
+
     .note {
       font-size: 14px;
       color: var(--muted);
@@ -688,6 +695,11 @@
         summaryEl.appendChild(note);
       }
 
+      const stockNote = document.createElement("p");
+      stockNote.className = "term-note";
+      stockNote.textContent = "A stock is a share of ownership in a company. Owning one means you own a small piece of that business.";
+      summaryEl.appendChild(stockNote);
+
       // ---- Earnings (Phase 3) ----
       renderEarnings(data);
 
@@ -710,6 +722,11 @@
         el.appendChild(note);
         return;
       }
+
+      const earningsNote = document.createElement("p");
+      earningsNote.className = "term-note";
+      earningsNote.textContent = "An earnings release is a company's quarterly report of how much money it made. Analysts predict these numbers ahead of time, and the actual results are compared against those predictions.";
+      el.appendChild(earningsNote);
 
       const latest = data.earnings.latest;
       const result = latest.result; // beat | miss | met
