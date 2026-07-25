@@ -896,6 +896,158 @@ app.get("/learn/what-is-a-10-k", (req, res) => {
   res.send(html);
 });
 
+app.get("/learn/what-is-a-10-q", (req, res) => {
+  const title = "What is a 10-Q? Plain-English Guide | Zelothorn";
+  const metaDesc = "What a 10-Q is, what's inside it (financials, MD&A, updated risk " +
+    "factors), when it's filed, and why it matters — explained in plain language.";
+  const canonicalUrl = "https://zelothorn.com/learn/what-is-a-10-q";
+
+  const html =
+`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(title)}</title>
+<meta name="description" content="${escapeHtml(metaDesc)}">
+<meta property="og:type" content="website">
+<meta property="og:url" content="${canonicalUrl}">
+<meta property="og:title" content="${escapeHtml(title)}">
+<meta property="og:description" content="${escapeHtml(metaDesc)}">
+<link rel="canonical" href="${canonicalUrl}">
+<style>${PAGE_STYLE}</style>
+</head>
+<body>
+  <h1>What is a 10-Q? A plain-English guide</h1>
+  <p class="sub">The short version: The 10-Q is the 10-K's smaller, more frequent
+  sibling — a quarterly check-in filed three times a year. Lighter, unaudited, but it's
+  how you keep up with a company between annual reports.</p>
+
+  <h2>What it is</h2>
+  <p>The 10-Q is a quarterly financial report public companies file with the SEC. Think
+  of it as a progress update between the big annual 10-K. It's shorter, and unlike the
+  10-K, the numbers are unaudited — reviewed by accountants, but not put through the full
+  audit the annual report gets. Companies file three 10-Qs a year; the fourth quarter gets
+  rolled into the annual 10-K instead.</p>
+
+  <h2>When it's filed</h2>
+  <p>Within 40 or 45 days of each quarter's end, depending on company size. Three times a
+  year — Q1, Q2, Q3. There's no Q4 10-Q, because that quarter's results live inside the
+  annual 10-K.</p>
+
+  <h2>What's inside</h2>
+  <p><strong>Financial statements.</strong> The quarter's numbers — revenue, profit,
+  cash — plus a comparison to the same quarter last year. Unaudited, but still on the
+  record.</p>
+  <p><strong>MD&amp;A.</strong> Management's shorter take on how the quarter went and
+  what changed.</p>
+  <p><strong>Updates to risk factors.</strong> Not the full list from the 10-K — just
+  what's new or changed since then. A new risk showing up mid-year is worth noticing.</p>
+
+  <h2>Why it matters</h2>
+  <p>The 10-Q is how you track a company in something close to real time. The 10-K is
+  once a year; a lot happens in twelve months. The quarterlies are where you catch a
+  trend forming — growth speeding up, margins slipping, a new risk appearing — before it
+  shows up in the annual report or the headlines.</p>
+  <p>The tradeoff for speed is depth: less detail than a 10-K, and unaudited. Still the
+  primary source, just a lighter one. Zelothorn gives you the plain-language version,
+  linked to the real filing.</p>
+
+  <h2>See a real one</h2>
+  <p>Each explained plainly, linked to the official document:<br>
+  <a href="/company/AAPL">Apple</a> &middot; <a href="/company/MSFT">Microsoft</a> &middot;
+  <a href="/company/TSLA">Tesla</a></p>
+
+  <p class="brand-line">Zelothorn explains what's already public. No ratings, no price
+  targets, no buy or sell advice — ever.</p>
+
+  <p class="disc">Zelothorn provides plain-language educational explanations and links to
+  official public data for educational purposes only. It is not financial advice and does
+  not recommend buying or selling any security.</p>
+
+  ${feedbackFormHtml("learn:what-is-a-10-q", "What is a 10-Q?")}
+</body>
+</html>`;
+
+  res.send(html);
+});
+
+app.get("/learn/what-is-an-8-k", (req, res) => {
+  const title = "What is an 8-K? Plain-English Guide | Zelothorn";
+  const metaDesc = "What an 8-K is, what triggers one (earnings, leadership changes, " +
+    "deals, material events), when it's filed, and why it matters — explained in plain language.";
+  const canonicalUrl = "https://zelothorn.com/learn/what-is-an-8-k";
+
+  const html =
+`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(title)}</title>
+<meta name="description" content="${escapeHtml(metaDesc)}">
+<meta property="og:type" content="website">
+<meta property="og:url" content="${canonicalUrl}">
+<meta property="og:title" content="${escapeHtml(title)}">
+<meta property="og:description" content="${escapeHtml(metaDesc)}">
+<link rel="canonical" href="${canonicalUrl}">
+<style>${PAGE_STYLE}</style>
+</head>
+<body>
+  <h1>What is an 8-K? A plain-English guide</h1>
+  <p class="sub">The short version: The 8-K is the "something just happened" filing.
+  When a major event hits between scheduled reports, companies have to tell the SEC
+  fast — usually within four business days. It's the closest thing to breaking news in
+  official filings.</p>
+
+  <h2>What it is</h2>
+  <p>An 8-K is a current report — filed whenever a significant event happens that
+  shareholders should know about, outside the regular quarterly and annual schedule.
+  Where the 10-K and 10-Q are periodic, the 8-K is triggered by events. Something
+  material occurs, the clock starts, and the company has to disclose it.</p>
+
+  <h2>When it's filed</h2>
+  <p>Usually within four business days of the triggering event. There's no set
+  schedule — a company might file several 8-Ks in a month or none for a while. The
+  timing itself tells you something: 8-Ks cluster around the moments that matter.</p>
+
+  <h2>What's inside</h2>
+  <p>It depends entirely on what happened. Common triggers include:</p>
+  <p><strong>Earnings releases —</strong> the quarterly numbers often come out via 8-K
+  first.</p>
+  <p><strong>Leadership changes —</strong> a CEO or CFO departing or being appointed.</p>
+  <p><strong>Major deals —</strong> acquisitions, mergers, big agreements.</p>
+  <p><strong>Material events —</strong> bankruptcy, a major lawsuit, delisting, or other
+  significant developments.</p>
+  <p>Each 8-K is labeled with an "item number" telling you which type of event it
+  covers.</p>
+
+  <h2>Why it matters</h2>
+  <p>The 8-K is where you find out what's happening now, straight from the company,
+  before it's been spun into a press narrative. If a 10-K is the annual story and the
+  10-Q is the quarterly update, the 8-K is the alert. When something big moves at a
+  company, there's usually an 8-K behind it.</p>
+  <p>Zelothorn gives you the plain-language version, linked to the real filing.</p>
+
+  <h2>See a real one</h2>
+  <p>Each explained plainly, linked to the official document:<br>
+  <a href="/company/AAPL">Apple</a> &middot; <a href="/company/MSFT">Microsoft</a> &middot;
+  <a href="/company/TSLA">Tesla</a></p>
+
+  <p class="brand-line">Zelothorn explains what's already public. No ratings, no price
+  targets, no buy or sell advice — ever.</p>
+
+  <p class="disc">Zelothorn provides plain-language educational explanations and links to
+  official public data for educational purposes only. It is not financial advice and does
+  not recommend buying or selling any security.</p>
+
+  ${feedbackFormHtml("learn:what-is-an-8-k", "What is an 8-K?")}
+</body>
+</html>`;
+
+  res.send(html);
+});
+
 
 /* ===================================================
    SEO SITEMAP + PRE-WARM LIST
@@ -937,6 +1089,8 @@ app.get("/sitemap.xml", async (req, res) => {
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url><loc>${base}/</loc></url>
   <url><loc>${base}/learn/what-is-a-10-k</loc></url>
+  <url><loc>${base}/learn/what-is-a-10-q</loc></url>
+  <url><loc>${base}/learn/what-is-an-8-k</loc></url>
 ${urls}
 </urlset>`;
 
