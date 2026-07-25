@@ -722,8 +722,8 @@ app.get("/company/:ticker", async (req, res) => {
 <body>
   <h1>What does ${escapeHtml(companyName)} do?</h1>
   <p class="sub">${escapeHtml(T)} &middot; Plain-English company overview</p>
-  ${summaryHtml}
   <p class="term-note">A stock is a share of ownership in a company. Owning one means you own a small piece of that business.</p>
+  ${summaryHtml}
   ${earningsHtml}
   <h2>SEC Filings</h2>
   ${filingsHtml}

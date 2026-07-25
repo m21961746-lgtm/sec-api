@@ -682,6 +682,12 @@
       // ---- AI summary ----
       const summaryEl = document.getElementById("summary");
       summaryEl.innerHTML = "";
+
+      const stockNote = document.createElement("p");
+      stockNote.className = "term-note";
+      stockNote.textContent = "A stock is a share of ownership in a company. Owning one means you own a small piece of that business.";
+      summaryEl.appendChild(stockNote);
+
       if (data.ai_summary) {
         data.ai_summary.split(/\n\s*\n/).filter(p => p.trim()).forEach(p => {
           const el = document.createElement("p");
@@ -694,11 +700,6 @@
         note.textContent = "The AI summary couldn't be generated this time, but the data below is still accurate.";
         summaryEl.appendChild(note);
       }
-
-      const stockNote = document.createElement("p");
-      stockNote.className = "term-note";
-      stockNote.textContent = "A stock is a share of ownership in a company. Owning one means you own a small piece of that business.";
-      summaryEl.appendChild(stockNote);
 
       // ---- Earnings (Phase 3) ----
       renderEarnings(data);
