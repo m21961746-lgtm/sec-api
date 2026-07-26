@@ -1207,6 +1207,8 @@ app.get("/developers", async (req, res) => {
       : `<p>No filings available right now.</p>`;
 
     exampleHtml = `
+    <p class="term-note">This is <code>GET /api/v1/company/AAPL</code> —
+      <a href="/api/v1/company/AAPL">see the raw JSON here</a>.</p>
     <div class="api-example">
       <div class="api-field">
         <span class="api-label">Company</span>
@@ -1225,8 +1227,7 @@ app.get("/developers", async (req, res) => {
         ${filingsListHtml}
       </div>
     </div>
-    <p class="term-note">This is <code>GET /api/v1/company/AAPL</code> —
-      <a href="/api/v1/company/AAPL">see the raw JSON here</a>.</p>`;
+    `;
   } catch (e) {
     // exampleHtml already holds the fallback set above
   }
@@ -1301,7 +1302,9 @@ ${headTagsHtml(title, metaDesc, canonicalUrl)}
 
       const apiUrl = "/api/v1/company/" + encodeURIComponent(api.ticker);
 
-      return '<div class="api-example">' +
+      return '<p class="term-note">This is <code>GET ' + apiUrl + '</code> — ' +
+          '<a href="' + apiUrl + '">see the raw JSON here</a>.</p>' +
+        '<div class="api-example">' +
           '<div class="api-field"><span class="api-label">Company</span>' +
             escapeHtml(api.company) + " (" + escapeHtml(api.ticker) + ")</div>" +
           '<div class="api-field"><span class="api-label">Summary</span><p>' +
@@ -1310,9 +1313,7 @@ ${headTagsHtml(title, metaDesc, canonicalUrl)}
             earningsLine + "</p></div>" +
           '<div class="api-field"><span class="api-label">Key filings</span>' +
             filingsListHtml + "</div>" +
-        "</div>" +
-        '<p class="term-note">This is <code>GET ' + apiUrl + '</code> — ' +
-          '<a href="' + apiUrl + '">see the raw JSON here</a>.</p>';
+        "</div>";
     }
 
     // Two honest failure cases: a genuine 404 ("not found") vs. anything
