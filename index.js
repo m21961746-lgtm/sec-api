@@ -750,7 +750,15 @@ app.get("/company/:ticker", async (req, res) => {
       );
     }
 
-    const filingsData = await getFilings(entry.cik);
+    let filingsData;
+    let filingsError = false;
+    try {
+      filingsData = await getFilings(entry.cik);
+    } catch (e) {
+      filingsData = { recent: [], key: [], name: null };
+      filingsError = true;
+    }
+
     const companyName = NAME_OVERRIDES[T] || tidyCompanyName(filingsData.name || entry.title);
 
     let aiSummary = null;
@@ -758,8 +766,13 @@ app.get("/company/:ticker", async (req, res) => {
     catch (e) { aiSummary = null; }
 
     let earnings = null;
-    try { earnings = await getEarnings(T); }
-    catch (e) { earnings = null; }
+    let earningsError = false;
+    try {
+      earnings = await getEarnings(T);
+    } catch (e) {
+      earnings = null;
+      earningsError = true;
+    }
 
     let earningsHtml = "";
     if (earnings && earnings.latest) {
@@ -774,6 +787,10 @@ app.get("/company/:ticker", async (req, res) => {
         `reported earnings of $${escapeHtml(L.actualEPS)} per share. Analysts expected ` +
         `$${escapeHtml(L.estimateEPS)} per share, so the company <strong>${verb}</strong> ` +
         `expectations.</p>`;
+    } else if (earningsError) {
+      earningsHtml =
+        `<h2>How did ${escapeHtml(companyName)}'s latest earnings compare?</h2>` +
+        `<p class="term-note">Earnings data is temporarily unavailable — please check back soon.</p>`;
     }
 
     const summaryHtml = aiSummary
@@ -781,7 +798,9 @@ app.get("/company/:ticker", async (req, res) => {
       : `<p>A plain-language overview for ${escapeHtml(companyName)} is being prepared. ` +
         `You can look up this company directly on <a href="/">Zelothorn</a>.</p>`;
 
-    const filingsHtml = renderFilingsHtml(filingsData);
+    const filingsHtml = filingsError
+      ? `<p class="term-note">Filings are temporarily unavailable — please check back soon, or view them directly on SEC.gov below.</p>`
+      : renderFilingsHtml(filingsData);
 
     const title = `What does ${companyName} do? | ${T} explained | Zelothorn`;
     const fallbackDesc = `A plain-language explanation of what ${companyName} (${T}) does, ` +
