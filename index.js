@@ -391,7 +391,14 @@ const REPORT_TTL = 6 * 60 * 60 * 1000; // 6 hours
    /resolve endpoint and the pre-warmer)
    =================================================== */
 async function buildReport(T, entry) {
-  const filingsData = await getFilings(entry.cik);
+  let filingsData;
+  let filingsError = false;
+  try {
+    filingsData = await getFilings(entry.cik);
+  } catch (e) {
+    filingsData = { recent: [], key: [], name: null };
+    filingsError = true;
+  }
 
   const companyName = NAME_OVERRIDES[T] || tidyCompanyName(filingsData.name || entry.title);
 
@@ -405,6 +412,7 @@ async function buildReport(T, entry) {
 
   let earnings = null;
   let earningsError = null;
+  let earningsUnavailable = false;
   try {
     earnings = await getEarnings(T);
     if (!earnings) {
@@ -412,6 +420,7 @@ async function buildReport(T, entry) {
     }
   } catch (e) {
     earningsError = e.message;
+    earningsUnavailable = true;
   }
 
   const payload = {
@@ -422,8 +431,10 @@ async function buildReport(T, entry) {
     ai_error: aiError,
     earnings: earnings,
     earnings_error: earningsError,
+    earnings_unavailable: earningsUnavailable,
     keyFilings: filingsData.key,
     filings: filingsData.recent,
+    filings_error: filingsError,
     sec_url: `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${entry.cik}&type=&dateb=&owner=include&count=40`
   };
 
@@ -433,6 +444,45 @@ async function buildReport(T, entry) {
   }
 
   return payload;
+}
+
+// Transform buildReport()'s internal payload into the versioned public
+// API contract: explicit status per section instead of null/error-string
+// ambiguity, so consumers can branch on it programmatically.
+function buildApiV1Payload(payload) {
+  const summaryStatus = payload.ai_summary ? "ok" : "unavailable";
+
+  let earningsStatus = "ok";
+  if (!payload.earnings) {
+    earningsStatus = payload.earnings_unavailable ? "unavailable" : "not_applicable";
+  }
+
+  const filingsStatus = payload.filings_error ? "unavailable" : "ok";
+
+  return {
+    ticker: payload.ticker,
+    cik: payload.cik,
+    company: payload.company,
+    summary: {
+      status: summaryStatus,
+      text: payload.ai_summary || null
+    },
+    earnings: {
+      status: earningsStatus,
+      latest: (payload.earnings && payload.earnings.latest) || null,
+      history: (payload.earnings && payload.earnings.history) || []
+    },
+    filings: {
+      status: filingsStatus,
+      key: payload.keyFilings || [],
+      recent: payload.filings || []
+    },
+    links: {
+      secEdgar: payload.sec_url,
+      companyPage: `https://zelothorn.com/company/${payload.ticker}`
+    },
+    generatedAt: new Date().toISOString()
+  };
 }
 
 /* =========================
@@ -484,6 +534,44 @@ app.get("/resolve", resolveRateLimit, async (req, res) => {
 
     const payload = await buildReport(T, entry);
     res.json(payload);
+  } catch (err) {
+    res.status(500).json({
+      error: "Failed to fetch data",
+      details: err.message
+    });
+  }
+});
+
+/* =========================
+   PUBLIC API v1:  /api/v1/company/:ticker
+   Exact ticker match only (no fuzzy name search - that's /resolve's
+   job for the homepage search box). Reuses buildReport()/reportCache,
+   so this shares a warm cache with /resolve for the same ticker.
+   ========================= */
+app.get("/api/v1/company/:ticker", resolveRateLimit, async (req, res) => {
+  const T = String(req.params.ticker || "").trim().toUpperCase();
+
+  if (!T) {
+    return res.status(400).json({ error: "Missing ticker" });
+  }
+  if (T.length > MAX_TICKER_LENGTH) {
+    return res.status(400).json({ error: "Ticker is too long" });
+  }
+
+  try {
+    const map = await loadTickerMap();
+    const entry = map[T];
+
+    if (!entry) {
+      return res.status(404).json({ error: `No company found for ticker '${T}'.` });
+    }
+
+    const cached = reportCache[T];
+    const payload = (cached && Date.now() - cached.at < REPORT_TTL)
+      ? cached.data
+      : await buildReport(T, entry);
+
+    res.json(buildApiV1Payload(payload));
   } catch (err) {
     res.status(500).json({
       error: "Failed to fetch data",
