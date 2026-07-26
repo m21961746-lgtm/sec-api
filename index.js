@@ -702,6 +702,15 @@ const PAGE_STYLE = `
        text-decoration:none;border-radius:8px;}
   .disc{color:#888;font-size:.85rem;margin-top:40px;border-top:1px solid #eee;padding-top:16px;}
   .brand-line{font-weight:600;color:#5a4750;margin:20px 0 0;}
+  .api-example{background:#f7f6f9;border:1px solid #eee;border-radius:10px;padding:16px 18px;margin:16px 0;}
+  .api-field{margin-bottom:14px;}
+  .api-field:last-child{margin-bottom:0;}
+  .api-field p{margin:0;}
+  .api-field ul{margin:0;padding-left:18px;}
+  .api-field li{margin-bottom:4px;}
+  .api-label{display:block;font-size:.7rem;font-weight:700;text-transform:uppercase;
+       letter-spacing:.04em;color:#888;margin-bottom:4px;}
+  code{background:#f0eef2;border-radius:4px;padding:2px 6px;font-size:.85em;}
   .filing-group{margin-bottom:22px;}
   .filing-group:last-child{margin-bottom:0;}
   .subhead{font-size:.8rem;font-weight:600;color:#1a1a1a;margin:4px 0 4px;}
@@ -738,12 +747,12 @@ const PAGE_STYLE = `
 // ID, e.g. a ticker or "learn:what-is-a-10-k"); label is the human-
 // readable text used in the mailto fallback's subject line, defaulting
 // to pageId when it's already readable (e.g. a ticker).
-function feedbackFormHtml(pageId, label = pageId) {
+function feedbackFormHtml(pageId, label = pageId, placeholder = "Was this explanation clear? Tell us what was confusing.") {
   const subject = encodeURIComponent(`Feedback: ${label}`);
   return `
   <form class="feedback-form" id="feedbackForm">
     <textarea id="feedbackMessage" name="message" rows="2" required
-      placeholder="Was this explanation clear? Tell us what was confusing."></textarea>
+      placeholder="${escapeHtml(placeholder)}"></textarea>
     <div class="feedback-row">
       <input type="email" id="feedbackEmail" name="email" placeholder="Your email (optional)">
       <button type="submit" id="feedbackSubmit">Send</button>
@@ -1146,6 +1155,110 @@ ${headTagsHtml(title, metaDesc, canonicalUrl)}
   res.send(html);
 });
 
+/* ===================================================
+   DEVELOPERS API LANDING PAGE
+   Marketing/docs page for /api/v1/company/:ticker. Renders a live
+   AAPL example via the same buildReport()/reportCache/buildApiV1Payload
+   pipeline the API itself uses - no separate data path, so this page
+   can't drift out of sync with what the API actually returns.
+   =================================================== */
+app.get("/developers", async (req, res) => {
+  const title = "Zelothorn Developer API | Plain-Language Company Data";
+  const metaDesc = "A JSON API returning plain-language company summaries, earnings " +
+    "beat/miss results, and SEC filings. GET /api/v1/company/:ticker.";
+  const canonicalUrl = "https://zelothorn.com/developers";
+
+  let exampleHtml = `<p class="term-note">Live example is temporarily unavailable — try ` +
+    `<a href="/api/v1/company/AAPL">GET /api/v1/company/AAPL</a> directly.</p>`;
+
+  try {
+    const map = await loadTickerMap();
+    const entry = map["AAPL"];
+    const cached = reportCache["AAPL"];
+    const payload = (cached && Date.now() - cached.at < REPORT_TTL)
+      ? cached.data
+      : await buildReport("AAPL", entry);
+    const api = buildApiV1Payload(payload);
+
+    let earningsLine = "Not available for this company right now.";
+    if (api.earnings.status === "ok") {
+      const L = api.earnings.latest;
+      const verb = L.result === "beat" ? "Beat" : (L.result === "miss" ? "Missed" : "Met");
+      earningsLine = `${verb} expectations — $${L.actualEPS} actual vs $${L.estimateEPS} ` +
+        `estimate (${escapeHtml(L.period)})`;
+    }
+
+    const keyFilings = (api.filings.key.length ? api.filings.key : api.filings.recent).slice(0, 2);
+    const filingsListHtml = keyFilings.length
+      ? `<ul>${keyFilings.map(f =>
+          `<li>${escapeHtml(f.form)} filed ${escapeHtml(f.filingDate)} — ` +
+          `<a href="${escapeHtml(f.url)}" target="_blank" rel="noopener">view</a></li>`
+        ).join("")}</ul>`
+      : `<p>No filings available right now.</p>`;
+
+    exampleHtml = `
+    <div class="api-example">
+      <div class="api-field">
+        <span class="api-label">Company</span>
+        ${escapeHtml(api.company)} (${escapeHtml(api.ticker)})
+      </div>
+      <div class="api-field">
+        <span class="api-label">Summary</span>
+        <p>${escapeHtml(api.summary.text || "Not available right now.")}</p>
+      </div>
+      <div class="api-field">
+        <span class="api-label">Latest earnings</span>
+        <p>${earningsLine}</p>
+      </div>
+      <div class="api-field">
+        <span class="api-label">Key filings</span>
+        ${filingsListHtml}
+      </div>
+    </div>
+    <p class="term-note">This is <code>GET /api/v1/company/AAPL</code> —
+      <a href="/api/v1/company/AAPL">see the raw JSON here</a>.</p>`;
+  } catch (e) {
+    // exampleHtml already holds the fallback set above
+  }
+
+  const html =
+`<!DOCTYPE html>
+<html lang="en">
+<head>
+${headTagsHtml(title, metaDesc, canonicalUrl)}
+<style>${PAGE_STYLE}</style>
+</head>
+<body>
+  <h1>Plain-language company data, ready for your app.</h1>
+  <p class="sub">The Zelothorn API returns what a company does, how it makes money,
+  whether its latest earnings beat or missed expectations, and its official SEC
+  filings — all as structured JSON.</p>
+
+  <h2>Live example</h2>
+  ${exampleHtml}
+
+  <h2>How to use it</h2>
+  <p><strong>Endpoint:</strong> <code>/api/v1/company/:ticker</code><br>
+  <strong>Method:</strong> GET<br>
+  <strong>Example:</strong> <code>https://zelothorn.com/api/v1/company/MSFT</code></p>
+  <p>Top-level fields returned:</p>
+  <ul>
+    <li><strong>company</strong> — name, ticker, and CIK</li>
+    <li><strong>summary</strong> — plain-language explanation of the business</li>
+    <li><strong>earnings</strong> — latest quarter's beat/miss result and recent history</li>
+    <li><strong>filings</strong> — key and recent SEC filings, each linked to the official document</li>
+    <li><strong>links</strong> — direct links to SEC EDGAR and the company's Zelothorn page</li>
+  </ul>
+
+  <h2>Get notified</h2>
+  <p>Want an API key when paid tiers launch? Tell me here.</p>
+  ${feedbackFormHtml("developers-api", "API access interest", "What would you build with this? Or leave your email for an API key when paid tiers launch.")}
+</body>
+</html>`;
+
+  res.send(html);
+});
+
 
 /* ===================================================
    SEO SITEMAP + PRE-WARM LIST
@@ -1189,6 +1302,7 @@ app.get("/sitemap.xml", async (req, res) => {
   <url><loc>${base}/learn/what-is-a-10-k</loc></url>
   <url><loc>${base}/learn/what-is-a-10-q</loc></url>
   <url><loc>${base}/learn/what-is-an-8-k</loc></url>
+  <url><loc>${base}/developers</loc></url>
 ${urls}
 </urlset>`;
 
