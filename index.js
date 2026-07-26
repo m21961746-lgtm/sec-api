@@ -701,6 +701,29 @@ function feedbackFormHtml(pageId, label = pageId) {
   </script>`;
 }
 
+// Shared <head> meta tags for server-rendered pages (/company/:ticker,
+// /learn/*): title, description, favicons, OG/Twitter tags, canonical.
+// One place to edit so all these pages can't drift out of sync.
+function headTagsHtml(title, metaDesc, canonicalUrl) {
+  const escTitle = escapeHtml(title);
+  const escDesc = escapeHtml(metaDesc);
+  return `<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escTitle}</title>
+<meta name="description" content="${escDesc}">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta property="og:type" content="website">
+<meta property="og:url" content="${canonicalUrl}">
+<meta property="og:title" content="${escTitle}">
+<meta property="og:description" content="${escDesc}">
+<meta property="og:image" content="https://zelothorn.com/og-image.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://zelothorn.com/og-image.png">
+<link rel="canonical" href="${canonicalUrl}">`;
+}
+
 app.get("/company/:ticker", async (req, res) => {
   const T = String(req.params.ticker || "").toUpperCase();
 
@@ -770,15 +793,7 @@ app.get("/company/:ticker", async (req, res) => {
 `<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${escapeHtml(title)}</title>
-<meta name="description" content="${escapeHtml(metaDesc)}">
-<meta property="og:type" content="website">
-<meta property="og:url" content="${canonicalUrl}">
-<meta property="og:title" content="${escapeHtml(title)}">
-<meta property="og:description" content="${escapeHtml(metaDesc)}">
-<link rel="canonical" href="${canonicalUrl}">
+${headTagsHtml(title, metaDesc, canonicalUrl)}
 <style>${PAGE_STYLE}</style>
 </head>
 <body>
@@ -827,15 +842,7 @@ app.get("/learn/what-is-a-10-k", (req, res) => {
 `<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${escapeHtml(title)}</title>
-<meta name="description" content="${escapeHtml(metaDesc)}">
-<meta property="og:type" content="website">
-<meta property="og:url" content="${canonicalUrl}">
-<meta property="og:title" content="${escapeHtml(title)}">
-<meta property="og:description" content="${escapeHtml(metaDesc)}">
-<link rel="canonical" href="${canonicalUrl}">
+${headTagsHtml(title, metaDesc, canonicalUrl)}
 <style>${PAGE_STYLE}</style>
 </head>
 <body>
@@ -906,15 +913,7 @@ app.get("/learn/what-is-a-10-q", (req, res) => {
 `<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${escapeHtml(title)}</title>
-<meta name="description" content="${escapeHtml(metaDesc)}">
-<meta property="og:type" content="website">
-<meta property="og:url" content="${canonicalUrl}">
-<meta property="og:title" content="${escapeHtml(title)}">
-<meta property="og:description" content="${escapeHtml(metaDesc)}">
-<link rel="canonical" href="${canonicalUrl}">
+${headTagsHtml(title, metaDesc, canonicalUrl)}
 <style>${PAGE_STYLE}</style>
 </head>
 <body>
@@ -982,15 +981,7 @@ app.get("/learn/what-is-an-8-k", (req, res) => {
 `<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${escapeHtml(title)}</title>
-<meta name="description" content="${escapeHtml(metaDesc)}">
-<meta property="og:type" content="website">
-<meta property="og:url" content="${canonicalUrl}">
-<meta property="og:title" content="${escapeHtml(title)}">
-<meta property="og:description" content="${escapeHtml(metaDesc)}">
-<link rel="canonical" href="${canonicalUrl}">
+${headTagsHtml(title, metaDesc, canonicalUrl)}
 <style>${PAGE_STYLE}</style>
 </head>
 <body>
