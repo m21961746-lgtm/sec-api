@@ -591,6 +591,9 @@ const seoPageCache = {};
 const SEO_PAGE_TTL = 6 * 60 * 60 * 1000; // 6 hours, same as the report cache
 
 // escape user/text content so it can't break the HTML
+// NOTE: mirrored by the client-side escapeHtml() in the /developers
+// route's <script> block below (browser JS, can't share this copy
+// directly). Keep both in sync if you edit either.
 function escapeHtml(str) {
   if (!str) return "";
   return String(str)
@@ -710,6 +713,13 @@ const PAGE_STYLE = `
   .api-field li{margin-bottom:4px;}
   .api-label{display:block;font-size:.7rem;font-weight:700;text-transform:uppercase;
        letter-spacing:.04em;color:#888;margin-bottom:4px;}
+  .ticker-preview-form{display:flex;gap:8px;margin:14px 0 4px;max-width:380px;}
+  .ticker-preview-form input{flex:1;box-sizing:border-box;font-family:inherit;font-size:.85rem;
+       color:#1a1a1a;background:#f7f6f9;border:1px solid #eee;border-radius:8px;padding:8px 10px;}
+  .ticker-preview-form button{border:none;cursor:pointer;font-family:inherit;font-size:.85rem;
+       font-weight:600;padding:8px 16px;border-radius:8px;background:#eee;color:#333;}
+  .ticker-preview-form button:hover{background:#e2e2e2;}
+  .ticker-preview-form button:disabled{opacity:.55;cursor:default;}
   code{background:#f0eef2;border-radius:4px;padding:2px 6px;font-size:.85em;}
   .filing-group{margin-bottom:22px;}
   .filing-group:last-child{margin-bottom:0;}
@@ -1235,7 +1245,13 @@ ${headTagsHtml(title, metaDesc, canonicalUrl)}
   filings — all as structured JSON.</p>
 
   <h2>Live example</h2>
-  ${exampleHtml}
+  <div id="apiExampleContainer">
+    ${exampleHtml}
+  </div>
+  <form class="ticker-preview-form" id="tickerPreviewForm">
+    <input type="text" id="tickerPreviewInput" placeholder="Try a ticker, e.g. MSFT" autocomplete="off" spellcheck="false">
+    <button type="submit" id="tickerPreviewSubmit">Preview</button>
+  </form>
 
   <h2>How to use it</h2>
   <p><strong>Endpoint:</strong> <code>/api/v1/company/:ticker</code><br>
@@ -1253,6 +1269,88 @@ ${headTagsHtml(title, metaDesc, canonicalUrl)}
   <h2>Get notified</h2>
   <p>Want an API key when paid tiers launch? Tell me here.</p>
   ${feedbackFormHtml("developers-api", "API access interest", "What would you build with this? Or leave your email for an API key when paid tiers launch.")}
+  <script>
+    // NOTE: intentional twin of escapeHtml() in index.js (server-side).
+    // Keep both in sync if you edit either.
+    function escapeHtml(str) {
+      if (!str) return "";
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function renderApiExample(api) {
+      let earningsLine = "Not available for this company right now.";
+      if (api.earnings.status === "ok" && api.earnings.latest) {
+        const L = api.earnings.latest;
+        const verb = L.result === "beat" ? "Beat" : (L.result === "miss" ? "Missed" : "Met");
+        earningsLine = verb + " expectations — $" + L.actualEPS + " actual vs $" +
+          L.estimateEPS + " estimate (" + escapeHtml(L.period) + ")";
+      }
+
+      const keyFilings = (api.filings.key.length ? api.filings.key : api.filings.recent).slice(0, 2);
+      const filingsListHtml = keyFilings.length
+        ? "<ul>" + keyFilings.map(function (f) {
+            return '<li>' + escapeHtml(f.form) + " filed " + escapeHtml(f.filingDate) +
+              ' — <a href="' + escapeHtml(f.url) + '" target="_blank" rel="noopener">view</a></li>';
+          }).join("") + "</ul>"
+        : "<p>No filings available right now.</p>";
+
+      const apiUrl = "/api/v1/company/" + encodeURIComponent(api.ticker);
+
+      return '<div class="api-example">' +
+          '<div class="api-field"><span class="api-label">Company</span>' +
+            escapeHtml(api.company) + " (" + escapeHtml(api.ticker) + ")</div>" +
+          '<div class="api-field"><span class="api-label">Summary</span><p>' +
+            escapeHtml(api.summary.text || "Not available right now.") + "</p></div>" +
+          '<div class="api-field"><span class="api-label">Latest earnings</span><p>' +
+            earningsLine + "</p></div>" +
+          '<div class="api-field"><span class="api-label">Key filings</span>' +
+            filingsListHtml + "</div>" +
+        "</div>" +
+        '<p class="term-note">This is <code>GET ' + apiUrl + '</code> — ' +
+          '<a href="' + apiUrl + '">see the raw JSON here</a>.</p>';
+    }
+
+    // Two honest failure cases: a genuine 404 ("not found") vs. anything
+    // else (network error, 500, timeout) - so a real company never wrongly
+    // shows "couldn't find it" during a brief outage.
+    function renderApiError(status) {
+      if (status === 404) {
+        return '<p class="term-note">Could not find that ticker — try another.</p>';
+      }
+      return '<p class="term-note">Something went wrong — try again in a moment.</p>';
+    }
+
+    const apiExampleContainer = document.getElementById("apiExampleContainer");
+    const tickerPreviewForm = document.getElementById("tickerPreviewForm");
+    const tickerPreviewInput = document.getElementById("tickerPreviewInput");
+    const tickerPreviewSubmit = document.getElementById("tickerPreviewSubmit");
+
+    tickerPreviewForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const ticker = tickerPreviewInput.value.trim().toUpperCase();
+      if (!ticker) return;
+
+      tickerPreviewSubmit.disabled = true;
+      try {
+        const res = await fetch("/api/v1/company/" + encodeURIComponent(ticker));
+        if (!res.ok) {
+          apiExampleContainer.innerHTML = renderApiError(res.status);
+          return;
+        }
+        const api = await res.json();
+        apiExampleContainer.innerHTML = renderApiExample(api);
+      } catch (err) {
+        apiExampleContainer.innerHTML = renderApiError(0);
+      } finally {
+        tickerPreviewSubmit.disabled = false;
+      }
+    });
+  </script>
 </body>
 </html>`;
 
