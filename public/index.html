@@ -80,12 +80,17 @@
     header { text-align: center; margin-bottom: 32px; }
 
     h1 {
-      font-family: "Playfair Display", serif;
-      font-weight: 600;
       font-size: clamp(40px, 8vw, 64px);
       margin: 0 0 10px;
-      color: var(--ink);
-      letter-spacing: -0.5px;
+      letter-spacing: -1.5px;
+    }
+    .wordmark-zelo {
+      font-weight: 700;
+      color: #4a3d5c;
+    }
+    .wordmark-thorn {
+      font-weight: 400;
+      color: #33333a;
     }
 
     .tagline {
@@ -479,7 +484,7 @@
 <body>
   <div class="wrap">
     <header>
-      <h1>Zelothorn</h1>
+      <h1><span class="wordmark-zelo">zelo</span><span class="wordmark-thorn">thorn</span></h1>
       <p class="tagline">Enter a company name or stock ticker for a plain-language explanation of the company — alongside its official SEC filings and how its latest earnings compared to expectations.</p>
     </header>
 
