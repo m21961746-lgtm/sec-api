@@ -1198,7 +1198,7 @@ app.get("/developers", async (req, res) => {
         `estimate (${escapeHtml(L.period)})`;
     }
 
-    const keyFilings = (api.filings.key.length ? api.filings.key : api.filings.recent).slice(0, 2);
+    const keyFilings = (api.filings.key.length ? api.filings.key : api.filings.recent).slice(0, 4);
     const filingsListHtml = keyFilings.length
       ? `<ul>${keyFilings.map(f =>
           `<li>${escapeHtml(f.form)} filed ${escapeHtml(f.filingDate)} — ` +
@@ -1292,7 +1292,7 @@ ${headTagsHtml(title, metaDesc, canonicalUrl)}
           L.estimateEPS + " estimate (" + escapeHtml(L.period) + ")";
       }
 
-      const keyFilings = (api.filings.key.length ? api.filings.key : api.filings.recent).slice(0, 2);
+      const keyFilings = (api.filings.key.length ? api.filings.key : api.filings.recent).slice(0, 4);
       const filingsListHtml = keyFilings.length
         ? "<ul>" + keyFilings.map(function (f) {
             return '<li>' + escapeHtml(f.form) + " filed " + escapeHtml(f.filingDate) +
