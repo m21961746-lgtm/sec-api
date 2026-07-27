@@ -1206,6 +1206,21 @@ app.get("/developers", async (req, res) => {
         ).join("")}</ul>`
       : `<p>No filings available right now.</p>`;
 
+    const linksListItems = [];
+    if (api.links && api.links.secEdgar) {
+      linksListItems.push(
+        `<li><a href="${escapeHtml(api.links.secEdgar)}" target="_blank" rel="noopener">SEC EDGAR</a></li>`
+      );
+    }
+    if (api.links && api.links.companyPage) {
+      linksListItems.push(
+        `<li><a href="${escapeHtml(api.links.companyPage)}" target="_blank" rel="noopener">Company page</a></li>`
+      );
+    }
+    const linksListHtml = linksListItems.length
+      ? `<ul>${linksListItems.join("")}</ul>`
+      : `<p>No links available right now.</p>`;
+
     exampleHtml = `
     <div class="api-example">
       <div class="api-field">
@@ -1223,6 +1238,10 @@ app.get("/developers", async (req, res) => {
       <div class="api-field">
         <span class="api-label">Key filings</span>
         ${filingsListHtml}
+      </div>
+      <div class="api-field">
+        <span class="api-label">Links</span>
+        ${linksListHtml}
       </div>
     </div>
     <p class="term-note">This is <code>GET /api/v1/company/AAPL</code> —
@@ -1300,6 +1319,21 @@ ${headTagsHtml(title, metaDesc, canonicalUrl)}
           }).join("") + "</ul>"
         : "<p>No filings available right now.</p>";
 
+      const linksListItems = [];
+      if (api.links && api.links.secEdgar) {
+        linksListItems.push(
+          '<li><a href="' + escapeHtml(api.links.secEdgar) + '" target="_blank" rel="noopener">SEC EDGAR</a></li>'
+        );
+      }
+      if (api.links && api.links.companyPage) {
+        linksListItems.push(
+          '<li><a href="' + escapeHtml(api.links.companyPage) + '" target="_blank" rel="noopener">Company page</a></li>'
+        );
+      }
+      const linksListHtml = linksListItems.length
+        ? "<ul>" + linksListItems.join("") + "</ul>"
+        : "<p>No links available right now.</p>";
+
       const apiUrl = "/api/v1/company/" + encodeURIComponent(api.ticker);
 
       return '<div class="api-example">' +
@@ -1311,6 +1345,8 @@ ${headTagsHtml(title, metaDesc, canonicalUrl)}
             earningsLine + "</p></div>" +
           '<div class="api-field"><span class="api-label">Key filings</span>' +
             filingsListHtml + "</div>" +
+          '<div class="api-field"><span class="api-label">Links</span>' +
+            linksListHtml + "</div>" +
         "</div>" +
         '<p class="term-note">This is <code>GET ' + apiUrl + '</code> — ' +
           '<a href="' + apiUrl + '">see the raw JSON here</a>.</p>';
