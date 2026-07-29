@@ -721,6 +721,12 @@ const PAGE_STYLE = `
   .ticker-preview-form button:hover{background:#e2e2e2;}
   .ticker-preview-form button:disabled{opacity:.55;cursor:default;}
   code{background:#f0eef2;border-radius:4px;padding:2px 6px;font-size:.85em;}
+  .code-block{background:#1a1a1a;color:#fff;border-radius:8px;padding:12px 16px;
+       margin:12px 0;font-family:monospace;font-size:.9rem;overflow-x:auto;line-height:1.4;}
+  .code-block-label{display:block;font-size:.8rem;font-weight:600;color:#888;
+       margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em;}
+  .code-block pre{margin:0;padding:0;font-family:inherit;font-size:inherit;
+       color:inherit;background:transparent;border:none;}
   .filing-group{margin-bottom:22px;}
   .filing-group:last-child{margin-bottom:0;}
   .subhead{font-size:.8rem;font-weight:600;color:#1a1a1a;margin:4px 0 4px;}
@@ -1271,6 +1277,29 @@ ${headTagsHtml(title, metaDesc, canonicalUrl)}
   </form>
   <div id="apiExampleContainer">
     ${exampleHtml}
+  </div>
+
+  <h2>Quick start</h2>
+  <p>Call it in your language:</p>
+
+  <div class="code-block">
+    <span class="code-block-label">cURL</span>
+    <pre>curl https://zelothorn.com/api/v1/company/AAPL</pre>
+  </div>
+
+  <div class="code-block">
+    <span class="code-block-label">Python</span>
+    <pre>import requests
+r = requests.get("https://zelothorn.com/api/v1/company/AAPL")
+data = r.json()
+print(data["summary"]["text"])</pre>
+  </div>
+
+  <div class="code-block">
+    <span class="code-block-label">JavaScript</span>
+    <pre>const res = await fetch("https://zelothorn.com/api/v1/company/AAPL");
+const data = await res.json();
+console.log(data.summary.text);</pre>
   </div>
 
   <h2>How to use it</h2>
