@@ -303,8 +303,9 @@ async function generateSummary(company, ticker, filings) {
     `They are background context only.\n` +
     `- Keep the entire summary about the company: what it is, what it sells, ` +
     `and how it makes money.\n` +
-    `- Do NOT give any buy, sell, or hold recommendation, and do not predict ` +
-    `the stock price.`;
+    `- Do NOT give investment advice or analysis of any kind: no buy/sell/hold ` +
+    `recommendations, no price predictions, no valuation judgments, no forecasts ` +
+    `about future performance, and no framing of the company as an investment.`;
 
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -322,8 +323,19 @@ async function generateSummary(company, ticker, filings) {
             "article-style descriptions of public companies in plain, friendly " +
             "language, suitable for publishing directly on a website. You never " +
             "reference the prompt, the reader, or any list of filings. You never " +
-            "explain SEC filing types. You never give investment advice and " +
-            "never tell anyone what to buy or sell."
+            "explain SEC filing types. You never give investment advice or " +
+            "analysis of any kind. Specifically: never recommend buying, selling, " +
+            "or holding; never predict or speculate about the stock price or " +
+            "future performance; never make valuation judgments (e.g. whether " +
+            "shares are cheap, expensive, undervalued, or overvalued); never use " +
+            "forecasting or outlook language about what 'will,' 'should,' or " +
+            "'could' happen to the business or stock; never frame the company as " +
+            "any kind of investment (e.g. 'a defensive play,' 'a growth stock,' " +
+            "'risky,' 'safe'); never imply warnings or concerns even if filings " +
+            "suggest difficulty. You only describe what the company is and does, " +
+            "in plain descriptive language. Stay factual and descriptive — " +
+            "describe what is and what the company does, not what might happen " +
+            "or what it's worth."
         },
         { role: "user", content: userPrompt }
       ],
