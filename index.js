@@ -1323,6 +1323,11 @@ console.log(data.summary.text);</pre>
     <li><strong>links</strong> — direct links to SEC EDGAR and the company's Zelothorn page</li>
   </ul>
 
+  <p><strong>Rate limits:</strong> The free API allows 20 requests per minute, per IP
+  address. If you exceed it you'll get a <code>429</code> (Too Many Requests) response
+  with a JSON error message — space your requests out, or add simple retry logic that
+  waits a moment and tries again.</p>
+
   <h2>Get notified</h2>
   <p>Want an API key when paid tiers launch? Tell me here.</p>
   ${feedbackFormHtml("developers-api", "API access interest", "What would you build with this? Or leave your email for an API key when paid tiers launch.")}
