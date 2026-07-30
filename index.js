@@ -366,6 +366,36 @@ async function generateSummary(company, ticker, filings) {
 }
 
 /* ===================================================
+   TICKER RESOLUTION
+   SEC writes share-class tickers with a hyphen (BRK-B), but
+   people type the dotted form (BRK.B) that Yahoo and Google
+   Finance use, so a direct key match alone never hits.
+   SEC also lags ticker renames in both directions: its file
+   has MRSH but not MMC, and still has FISV but not FI.
+   Direct match is tried FIRST, so an alias stops applying on
+   its own once SEC catches up.
+   =================================================== */
+const TICKER_ALIASES = {
+  "MMC": "MRSH",   // Marsh & McLennan rebranded to Marsh, Jan 2026
+  "SQ":  "XYZ",    // Block, Inc. changed ticker from SQ
+  "FI":  "FISV",   // Fiserv renamed; SEC file still lists FISV
+};
+
+function resolveTicker(map, T) {
+  if (map[T]) return { ticker: T, entry: map[T] };
+
+  const hyphenated = T.replace(/\./g, "-");
+  if (hyphenated !== T && map[hyphenated]) {
+    return { ticker: hyphenated, entry: map[hyphenated] };
+  }
+
+  const alias = TICKER_ALIASES[T];
+  if (alias && map[alias]) return { ticker: alias, entry: map[alias] };
+
+  return null;
+}
+
+/* ===================================================
    NAME SEARCH (plan B)
    If what the user typed isn't a ticker, try matching
    it against company NAMES from SEC's list instead.
@@ -521,7 +551,12 @@ app.get("/resolve", resolveRateLimit, async (req, res) => {
 
   try {
     const map = await loadTickerMap();
-    let entry = map[T];
+    let entry = null;
+    const resolved = resolveTicker(map, T);
+    if (resolved) {
+      T = resolved.ticker;
+      entry = resolved.entry;
+    }
 
     // Plan B: not a ticker? Try matching a company name ("DISNEY" -> DIS)
     if (!entry) {
@@ -572,16 +607,21 @@ app.get("/api/v1/company/:ticker", resolveRateLimit, async (req, res) => {
 
   try {
     const map = await loadTickerMap();
-    const entry = map[T];
+    const resolved = resolveTicker(map, T);
 
-    if (!entry) {
+    if (!resolved) {
       return res.status(404).json({ error: `No company found for ticker '${T}'.` });
     }
 
-    const cached = reportCache[T];
+    // Everything downstream keys off the canonical SEC ticker, so
+    // BRK.B and BRK-B share one cache entry instead of building twice.
+    const canonical = resolved.ticker;
+    const entry = resolved.entry;
+
+    const cached = reportCache[canonical];
     const payload = (cached && Date.now() - cached.at < REPORT_TTL)
       ? cached.data
-      : await buildReport(T, entry);
+      : await buildReport(canonical, entry);
 
     res.json(buildApiV1Payload(payload));
   } catch (err) {
@@ -855,7 +895,7 @@ function headTagsHtml(title, metaDesc, canonicalUrl) {
 }
 
 app.get("/company/:ticker", async (req, res) => {
-  const T = String(req.params.ticker || "").toUpperCase();
+  let T = String(req.params.ticker || "").toUpperCase();
 
   // Serve from cache only if the page is still fresh
   const cachedPage = seoPageCache[T];
@@ -865,9 +905,9 @@ app.get("/company/:ticker", async (req, res) => {
 
   try {
     const map = await loadTickerMap();
-    const entry = map[T];
+    const resolved = resolveTicker(map, T);
 
-    if (!entry) {
+    if (!resolved) {
       const missingSubject = encodeURIComponent(`Missing: ${T}`);
       return res.status(404).send(
         `<!DOCTYPE html><html><head><meta charset="utf-8">` +
@@ -878,6 +918,17 @@ app.get("/company/:ticker", async (req, res) => {
         `<p><a href="mailto:zelothornsupport@gmail.com?subject=${missingSubject}" style="color:#888;font-size:.85rem;text-decoration:none;">Looking for a company we don't cover? Tell us which one →</a></p>` +
         `</body></html>`
       );
+    }
+
+    // Switch to the canonical SEC ticker before building anything, so the
+    // page body, earnings lookup, canonical URL and cache key all agree.
+    // A request for BRK.B renders and caches the real BRK-B page.
+    T = resolved.ticker;
+    const entry = resolved.entry;
+
+    const canonicalCachedPage = seoPageCache[T];
+    if (canonicalCachedPage && Date.now() - canonicalCachedPage.at < SEO_PAGE_TTL) {
+      return res.send(canonicalCachedPage.html);
     }
 
     let filingsData;
@@ -1474,7 +1525,7 @@ console.log(data.summary.text);</pre>
    main tool is instant for them, always.
    =================================================== */
 const SEO_TICKERS = [
-  "AAPL","MSFT","GOOGL","AMZN","NVDA","META","TSLA","BRK.B","JPM","V",
+  "AAPL","MSFT","GOOGL","AMZN","NVDA","META","TSLA","BRK-B","JPM","V",
   "UNH","XOM","JNJ","WMT","MA","PG","HD","CVX","LLY","ABBV",
   "AVGO","PEP","KO","COST","MRK","ADBE","CSCO","MCD","CRM","ACN",
   "TMO","ABT","NKE","DHR","LIN","TXN","NEE","ORCL","PM","WFC",
@@ -1482,15 +1533,15 @@ const SEO_TICKERS = [
   "UPS","LOW","INTU","SBUX","GS","BLK","ELV","DE","AXP","SPGI",
   "PLD","BKNG","MDT","GILD","ADP","TJX","VRTX","C","LMT","SCHW",
   "MDLZ","CVS","MO","AMT","CI","SO","ZTS","DUK","BDX","CB",
-  "MMC","REGN","PGR","AON","ITW","EOG","SLB","APD","BSX","NOC",
-  "PANW","MU","LRCX","KLAC","SNPS","CDNS","MELI","ABNB","PYPL","SQ",
+  "MRSH","REGN","PGR","AON","ITW","EOG","SLB","APD","BSX","NOC",
+  "PANW","MU","LRCX","KLAC","SNPS","CDNS","MELI","ABNB","PYPL","XYZ",
   "SHOP","UBER","LYFT","SNAP","PINS","SPOT","NET","DDOG","SNOW","CRWD",
   "ZM","DOCU","ROKU","TWLO","OKTA","TEAM","ZS","MDB","PLTR","COIN",
   "HOOD","SOFI","RBLX","DASH","RIVN","LCID","F","GM","NIO","XPEV",
   "T","VZ","TMUS","CMCSA","NFLX","WBD","ARM","FOX","EA","TTWO",
   "MAR","HLT","LULU","ROST","DG","DLTR","ORLY","AZO","YUM","CMG",
-  "KHC","GIS","K","HSY","STZ","KDP","MNST","CL","KMB","EL",
-  "WBA","MCK","CNC","HUM","BIIB","ILMN","MRNA","DXCM","IDXX","ISRG",
+  "KHC","GIS","HSY","STZ","KDP","MNST","CL","KMB","EL",
+  "MCK","CNC","HUM","BIIB","ILMN","MRNA","DXCM","IDXX","ISRG",
   "NOW","FTNT","ADSK","WDAY","ANET","KEYS","GLW","HPQ","DELL","WDC",
   "STX","NXPI","ADI","MCHP","ON","MPWR","FSLR","ENPH","PLUG","RUN",
   "GME","AMC","BBBY","SMCI","CLOV","TLRY","CGC","DKNG","PENN","WYNN"
@@ -1538,8 +1589,14 @@ async function prewarmAll() {
 
     for (const rawTicker of SEO_TICKERS) {
       const T = rawTicker.toUpperCase();
-      const entry = map[T];
-      if (!entry) continue; // ticker not in SEC list (e.g. delisted) — skip
+      const resolved = resolveTicker(map, T);
+      // Warn rather than skip silently: a dead entry here is also a dead
+      // URL in sitemap.xml, and silence is what let that go unnoticed.
+      if (!resolved) {
+        console.warn(`[prewarm] SEO ticker not in SEC list, skipping: ${T}`);
+        continue;
+      }
+      const entry = resolved.entry;
 
       // still fresh? skip it
       const cached = reportCache[T];
