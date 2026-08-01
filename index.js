@@ -213,10 +213,31 @@ async function getFilings(cik) {
 /* ===================================================
    NAME TIDY (polish)
    =================================================== */
+/* Trailing legal forms SEC appends to registrant names. Stripped so page
+   titles read "Verizon Communications", not "Verizon Communications INC". */
+const LEGAL_SUFFIX_RE =
+  /[,\s]+(?:inc|incorporated|corp|corporation|co|company|llc|l\.l\.c|ltd|limited)\.?$/i;
+
+function stripLegalSuffix(name) {
+  let out = String(name).trim().replace(/[,\s]+$/, "");
+  let prev;
+  do {                                   // handles stacked forms ("... Co Inc.")
+    prev = out;
+    out = out
+      .replace(LEGAL_SUFFIX_RE, "")
+      // "JPMorgan Chase & Co." would otherwise strip to a dangling "&"
+      .replace(/[,\s]+(?:&|and)$/i, "")
+      .replace(/[,\s]+$/, "")
+      .trim();
+  } while (out !== prev && out);
+  return out || String(name).trim();     // never return an empty name
+}
+
 function tidyCompanyName(name) {
   if (!name) return name;
-  if (/[a-z]/.test(name)) return name; // already mixed case — trust it
-  return name
+  const stripped = stripLegalSuffix(name);
+  if (/[a-z]/.test(stripped)) return stripped; // already mixed case — trust it
+  return stripped
     .toLowerCase()
     .split(/\s+/)
     .map(w => {
@@ -666,7 +687,13 @@ function paragraphsToHtml(text) {
 }
 
 // Build a search-snippet description from the AI summary: strip any HTML,
-// collapse whitespace, and truncate at a word boundary (not mid-word).
+// collapse whitespace, and cut at the last complete sentence that fits,
+// falling back to a word boundary only if the first sentence overruns.
+/* Periods that close an abbreviation rather than a sentence. Without this,
+   "Meta Platforms, Inc. is a..." would be cut after "Inc." */
+const ABBREV_TAIL =
+  /\b(?:inc|corp|co|ltd|jr|sr|st|vs|etc|dr|mr|mrs|ms|no|approx|u\.s|u\.k|e\.g|i\.e)\.$/i;
+
 function summaryToMetaDescription(text, maxLength = 150) {
   if (!text) return null;
   const plain = String(text)
@@ -676,10 +703,56 @@ function summaryToMetaDescription(text, maxLength = 150) {
   if (!plain) return null;
   if (plain.length <= maxLength) return plain;
 
+  // Prefer the last COMPLETE sentence that fits, so a search snippet never
+  // ends on a dangling fragment.
+  let bestEnd = -1;
+  const re = /[.!?](?=\s|$)/g;
+  let m;
+  while ((m = re.exec(plain)) !== null) {
+    const end = m.index + 1;
+    if (end > maxLength) break;
+    if (ABBREV_TAIL.test(plain.slice(0, end))) continue;
+    bestEnd = end;
+  }
+  if (bestEnd > 0) return plain.slice(0, bestEnd).trim();
+
+  // Even the first sentence overruns the budget — clip on a word boundary.
   const truncated = plain.slice(0, maxLength);
   const lastSpace = truncated.lastIndexOf(" ");
   const clipped = lastSpace > 0 ? truncated.slice(0, lastSpace) : truncated;
   return clipped.trim() + "…";
+}
+
+/* ===================================================
+   SEO TITLE + META DESCRIPTION for /company/:ticker
+
+   Titles are clamped to ~60 chars so Google doesn't truncate them; long
+   company names drop the "& How It Makes Money" half rather than being
+   cut mid-phrase.
+
+   Descriptions lead with the company's own summary (unique per page, which
+   is what indexing needs) and always append the hook. LEAD_MAX is set high
+   enough that a first sentence is kept whole rather than clipped: the
+   trade-off is that on longer summaries the hook sits past Google's ~160
+   char display cutoff. Unique bodies win that trade deliberately.
+   =================================================== */
+const TITLE_MAX = 60;
+
+function buildCompanyTitle(companyName, T) {
+  const long = `${companyName} (${T}): What It Does & How It Makes Money`;
+  if (long.length <= TITLE_MAX) return long;
+  return `${companyName} (${T}): What It Does`;
+}
+
+const META_DESC_LEAD_MAX = 200;
+const META_DESC_SUFFIX =
+  " Includes latest earnings vs. estimates and official SEC filings.";
+
+function buildCompanyMetaDescription(aiSummary, companyName, T) {
+  const lead =
+    summaryToMetaDescription(aiSummary, META_DESC_LEAD_MAX) ||
+    `A plain-language explanation of what ${companyName} (${T}) does and how it makes money.`;
+  return lead + META_DESC_SUFFIX;
 }
 
 // Plain-English names + short descriptions for common SEC filing codes.
@@ -983,10 +1056,8 @@ app.get("/company/:ticker", async (req, res) => {
       ? `<p class="term-note">Filings are temporarily unavailable — please check back soon, or view them directly on SEC.gov below.</p>`
       : renderFilingsHtml(filingsData);
 
-    const title = `What does ${companyName} do? | ${T} explained | Zelothorn`;
-    const fallbackDesc = `A plain-language explanation of what ${companyName} (${T}) does, ` +
-      `how it makes money, and how its latest earnings compared to expectations.`;
-    const metaDesc = summaryToMetaDescription(aiSummary) || fallbackDesc;
+    const title = buildCompanyTitle(companyName, T);
+    const metaDesc = buildCompanyMetaDescription(aiSummary, companyName, T);
     const canonicalUrl = `https://zelothorn.com/company/${escapeHtml(T)}`;
 
     const html =
