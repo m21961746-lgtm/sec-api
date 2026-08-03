@@ -342,8 +342,179 @@ async function getEarnings(ticker) {
 }
 
 /* ===================================================
-   PHASE 1: AI SUMMARY
+   PHASE 1: BUSINESS DESCRIPTION (from the 10-K)
+
+   The company description is taken straight from "Item 1 — Business"
+   in the company's own latest 10-K, rather than generated. It costs
+   nothing, cannot be blanked by a billing problem, and is the
+   company's own words on the public record.
+
+   Not every filer works: some (VZ) publish a primary document with no
+   recognisable Item 1 heading, and foreign filers use 20-F/40-F, which
+   this does not parse. Those fall back to no description block rather
+   than erroring — see buildBusinessBlock().
    =================================================== */
+const BUSINESS_CACHE_TTL = 30 * 24 * 60 * 60 * 1000; // 30 days; 10-Ks are annual
+const BUSINESS_DOC_MAX_BYTES = 25 * 1024 * 1024;     // largest seen ~12MB (JPM)
+const BUSINESS_SECTION_MAX = 20000;
+const businessCache = {}; // ticker -> { at, data }
+
+const HTML_ENTITIES = {
+  nbsp: " ", amp: "&", lt: "<", gt: ">", quot: '"', apos: "'",
+  rsquo: "’", lsquo: "‘", ldquo: "“", rdquo: "”",
+  mdash: "—", ndash: "–", hellip: "…", reg: "®",
+  trade: "™", copy: "©", bull: "•", sect: "§"
+};
+
+function filingHtmlToText(html) {
+  let s = html;
+  s = s.replace(/<(script|style|head)\b[\s\S]*?<\/\1>/gi, " ");
+  // Many filers lay section headings out inside small tables, so dropping
+  // every table loses "Item 1. Business" entirely (Amazon, Verizon do this).
+  // Keep small tables as text; drop large ones, which are financial grids.
+  s = s.replace(/<table\b[\s\S]*?<\/table>/gi, (m) => {
+    const inner = m.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    return inner.length <= 200 ? "\n\n" + inner + "\n\n" : "\n\n";
+  });
+  s = s.replace(/<\/(p|div|tr|li|h[1-6])\s*>/gi, "\n\n");
+  s = s.replace(/<br\s*\/?>/gi, "\n");
+  s = s.replace(/<[^>]+>/g, " ");
+  s = s.replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)));
+  s = s.replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)));
+  s = s.replace(/&([a-z]+);/gi, (m, n) => HTML_ENTITIES[n.toLowerCase()] || m);
+  s = s.replace(/ /g, " ");
+  s = s.replace(/[ \t]+/g, " ");
+  s = s.replace(/ *\n */g, "\n");
+  s = s.replace(/\n{3,}/g, "\n\n");
+  return s.trim();
+}
+
+/* Filers split headings across XBRL spans, so the plain text can read
+   "ITEM 1. B USINESS" (Microsoft does exactly this). Match against a
+   whitespace-stripped copy and map offsets back to the original. */
+function compactWithMap(text) {
+  const chars = [];
+  const map = [];
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === " " || c === "\n" || c === "\t" || c === "\r") continue;
+    chars.push(c.toLowerCase());
+    map.push(i);
+  }
+  return { compact: chars.join(""), map };
+}
+
+// Is this paragraph readable prose, rather than a heading, footnote or
+// the debris left behind by a stripped table?
+function isBusinessProse(p) {
+  if (p.length < 120) return false;
+  if (!/[.!?]/.test(p)) return false;
+  if (/^\(\d+\)/.test(p)) return false;                        // chart footnote
+  if (/^(item|part)\b/i.test(p)) return false;                 // running header
+  // Definitional preamble ("In this report, the terms X mean Y") - accurate,
+  // but tells a reader nothing about the business.
+  if (/^(references\b|in this (annual )?report|unless the context|as used in this)/i.test(p)) return false;
+  if (/forward-looking statements/i.test(p) && p.length < 600) return false;
+  const letters = (p.match(/[A-Za-z]/g) || []).length;
+  const digits = (p.match(/[0-9]/g) || []).length;
+  if (letters / p.length < 0.7) return false;
+  if (digits / p.length > 0.12) return false;                  // table remnant
+  const upper = (p.match(/[A-Z]/g) || []).length;
+  if (letters && upper / letters > 0.5) return false;          // ALL-CAPS heading
+  return true;
+}
+
+function extractBusinessParagraphs(text) {
+  const { compact, map } = compactWithMap(text);
+
+  const starts = [...compact.matchAll(/item1[.:—–-]*business/g)]
+    .map(m => m.index + m[0].length);
+  if (!starts.length) return null;
+
+  const ends = [...compact.matchAll(/item1a[.:—–-]*riskfactors/g)].map(m => m.index);
+
+  // The contents page repeats these headings. Score each candidate by how
+  // much sentence-like prose follows it and take the best.
+  let best = null;
+  for (const s of starts) {
+    const realStart = map[s] !== undefined ? map[s] : text.length;
+    const probe = text.slice(realStart, realStart + 3000);
+    const score = (probe.match(/[.!?]\s/g) || []).length;
+    if (!best || score > best.score) best = { s, realStart, score };
+  }
+  if (!best || best.score < 5) return null; // contents page only
+
+  const cEnd = ends.find(x => x > best.s);
+  const realEnd = (cEnd !== undefined && map[cEnd] !== undefined) ? map[cEnd] : text.length;
+  const section = text.slice(best.realStart, Math.min(realEnd, best.realStart + BUSINESS_SECTION_MAX));
+
+  const paras = section
+    .split(/\n{2,}/)
+    .map(p => p.replace(/\s+/g, " ").trim())
+    .filter(isBusinessProse);
+
+  return paras.length ? paras.slice(0, 2) : null;
+}
+
+// Newest 10-K among the filings we already fetched for this company.
+function findLatest10K(filingsData) {
+  const all = [...(filingsData.key || []), ...(filingsData.recent || [])];
+  return all.find(f => f.form === "10-K") || null;
+}
+
+/* Returns { paragraphs, filingUrl, filingDate } or null. Never throws:
+   a company with no usable 10-K simply has no description block. */
+async function getBusinessDescription(ticker, filingsData) {
+  const cached = businessCache[ticker];
+  if (cached && Date.now() - cached.at < BUSINESS_CACHE_TTL) {
+    return cached.data;
+  }
+
+  let result = null;
+  try {
+    const tenK = findLatest10K(filingsData);
+    if (!tenK || !tenK.url) {
+      console.warn(`[business] ${ticker}: no 10-K in recent filings`);
+    } else {
+      const res = await fetch(tenK.url, {
+        headers: SEC_HEADERS,
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
+      });
+      if (!res.ok) {
+        console.warn(`[business] ${ticker}: filing fetch failed (status ${res.status})`);
+      } else {
+        const html = await res.text();
+        if (html.length > BUSINESS_DOC_MAX_BYTES) {
+          console.warn(`[business] ${ticker}: filing too large (${html.length} bytes), skipping`);
+        } else {
+          const paragraphs = extractBusinessParagraphs(filingHtmlToText(html));
+          if (!paragraphs) {
+            console.warn(`[business] ${ticker}: no Item 1 Business prose found`);
+          } else {
+            result = { paragraphs, filingUrl: tenK.url, filingDate: tenK.filingDate };
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn(`[business] ${ticker}: extraction failed (${e.message})`);
+  }
+
+  // Cache misses too, so a filer we can't parse isn't re-fetched every hit.
+  businessCache[ticker] = { at: Date.now(), data: result };
+  return result;
+}
+
+/* ===================================================
+   AI SUMMARY (retained, disabled by default)
+
+   Superseded by the 10-K Business extraction above. Kept intact and
+   behind USE_OPENAI_SUMMARY so it can be re-enabled, but nothing calls
+   it unless that env var is set to "true" - an empty OpenAI balance can
+   no longer blank the site.
+   =================================================== */
+const USE_OPENAI_SUMMARY = process.env.USE_OPENAI_SUMMARY === "true";
+
 async function generateSummary(company, ticker, filings) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -512,12 +683,19 @@ async function buildReport(T, entry) {
 
   const companyName = NAME_OVERRIDES[T] || tidyCompanyName(filingsData.name || entry.title);
 
-  let aiSummary = null;
-  let aiError = null;
-  try {
-    aiSummary = await generateSummary(companyName, T, filingsData.recent);
-  } catch (e) {
-    aiError = e.message;
+  // Primary source: the company's own 10-K. OpenAI is only consulted if
+  // explicitly re-enabled, so a billing problem cannot blank summaries.
+  const business = await getBusinessDescription(T, filingsData);
+  let aiSummary = business ? business.paragraphs.join("\n\n") : null;
+  let aiError = business ? null : "No Item 1 Business section available for this filer";
+
+  if (!aiSummary && USE_OPENAI_SUMMARY) {
+    try {
+      aiSummary = await generateSummary(companyName, T, filingsData.recent);
+      aiError = null;
+    } catch (e) {
+      aiError = e.message;
+    }
   }
 
   let earnings = null;
@@ -932,6 +1110,8 @@ const PAGE_STYLE = `
   .feedback-status{font-size:.75rem;min-height:14px;margin:0;color:#888;}
   .feedback-status.success{color:#2f8f5b;}
   .feedback-status.error{color:#9c4b4b;}
+       margin-right:2px;border:1px solid #eee;border-radius:6px;text-decoration:none;}
+       columns:2;column-gap:28px;}
   a{color:#0b5;}
 `;
 
@@ -1062,9 +1242,13 @@ app.get("/company/:ticker", async (req, res) => {
 
     const companyName = NAME_OVERRIDES[T] || tidyCompanyName(filingsData.name || entry.title);
 
-    let aiSummary = null;
-    try { aiSummary = await generateSummary(companyName, T, filingsData.recent); }
-    catch (e) { aiSummary = null; }
+    const business = await getBusinessDescription(T, filingsData);
+    let aiSummary = business ? business.paragraphs.join("\n\n") : null;
+
+    if (!aiSummary && USE_OPENAI_SUMMARY) {
+      try { aiSummary = await generateSummary(companyName, T, filingsData.recent); }
+      catch (e) { aiSummary = null; }
+    }
 
     let earnings = null;
     let earningsError = false;
@@ -1094,10 +1278,20 @@ app.get("/company/:ticker", async (req, res) => {
         `<p class="term-note">Earnings data is temporarily unavailable — please check back soon.</p>`;
     }
 
-    const summaryHtml = aiSummary
-      ? paragraphsToHtml(aiSummary)
-      : `<p>A plain-language overview for ${escapeHtml(companyName)} is being prepared. ` +
-        `You can look up this company directly on <a href="/">Zelothorn</a>.</p>`;
+    // Description comes from the company's own 10-K, so say so and link the
+    // source. If no usable filing section exists, omit the block entirely
+    // rather than showing a placeholder that never resolves.
+    let summaryHtml = "";
+    if (business) {
+      summaryHtml =
+        `<p class="term-note">In the company's own words, from Item 1 (Business) of its ` +
+        `latest annual report filed with the SEC${business.filingDate ? ` on ${escapeHtml(business.filingDate)}` : ""}.</p>` +
+        paragraphsToHtml(aiSummary) +
+        `<p><a href="${escapeHtml(business.filingUrl)}" target="_blank" rel="noopener">` +
+        `Read the full 10-K on SEC.gov &rarr;</a></p>`;
+    } else if (aiSummary) {
+      summaryHtml = paragraphsToHtml(aiSummary);
+    }
 
     const filingsHtml = filingsError
       ? `<p class="term-note">Filings are temporarily unavailable — please check back soon, or view them directly on SEC.gov below.</p>`
