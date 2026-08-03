@@ -207,7 +207,14 @@ async function getFilings(cik) {
     if (found) keyFilings.push(found);
   }
 
-  return { recent: recentList, key: keyFilings, name: data.name || null };
+  return {
+    recent: recentList,
+    key: keyFilings,
+    name: data.name || null,
+    // SEC's own entity blurb, used as a description fallback. In practice
+    // it is empty for most registrants, so it rarely fires.
+    description: (data.description || "").trim() || null
+  };
 }
 
 /* ===================================================
@@ -413,8 +420,12 @@ function isBusinessProse(p) {
   if (/^(item|part)\b/i.test(p)) return false;                 // running header
   // Definitional preamble ("In this report, the terms X mean Y") - accurate,
   // but tells a reader nothing about the business.
-  if (/^(references\b|in this (annual )?report|unless the context|as used in this)/i.test(p)) return false;
-  if (/forward-looking statements/i.test(p) && p.length < 600) return false;
+  if (/^(references\b|in this (annual )?report|when used in this|unless the context|as used in this)/i.test(p)) return false;
+  if (/forward-looking statements/i.test(p)) return false;   // safe-harbour text
+  if (COVER_PAGE_BOILERPLATE.test(p)) return false;
+  // Must begin a sentence. A paragraph starting mid-clause is a fragment left
+  // by a stripped table or page break, not a description.
+  if (!/^["“(]?[A-Z]/.test(p)) return false;
   const letters = (p.match(/[A-Za-z]/g) || []).length;
   const digits = (p.match(/[0-9]/g) || []).length;
   if (letters / p.length < 0.7) return false;
@@ -424,25 +435,47 @@ function isBusinessProse(p) {
   return true;
 }
 
-function extractBusinessParagraphs(text) {
+/* Cover pages, exhibit indexes and legal furniture are prose-shaped but say
+   nothing about the business. Without this the whole-document fallback
+   returns things like "Delaware 13-5315170 (State or other jurisdiction of
+   incorporation)" as a company description. */
+const COVER_PAGE_BOILERPLATE = /(securities exchange act|i\.?r\.?s\.? employer|regulation s-t|check mark|state or other jurisdiction|state of incorporation|not for trading|subsequent events|incorporated by reference|title of each class|emerging growth company|well-known seasoned issuer|aggregate market value|commission file number|depositary shares|accelerated filer|shell company|filed herewith|exhibit index|our website is|no material changes)/i;
+
+/* A paragraph only counts as a usable description if it actually talks about
+   the company. This is what separates a real description from legal
+   furniture that merely looks like prose. */
+function readsLikeDescription(p, companyName) {
+  const key = String(companyName || "").split(/[\s,]+/)[0].replace(/[^A-Za-z]/g, "");
+  const re = new RegExp("\\b(we|our|the company|the group" + (key ? "|" + key : "") + ")\\b", "i");
+  return re.test(p.slice(0, 140));
+}
+
+/* Generic section extractor. startRe/endRe run against the whitespace-stripped
+   copy, so they must be written without spaces (see compactWithMap). */
+function extractSectionParagraphs(text, startRe, endRe, companyName) {
   const { compact, map } = compactWithMap(text);
 
-  const starts = [...compact.matchAll(/item1[.:—–-]*business/g)]
-    .map(m => m.index + m[0].length);
+  const starts = [...compact.matchAll(startRe)].map(m => m.index + m[0].length);
   if (!starts.length) return null;
 
-  const ends = [...compact.matchAll(/item1a[.:—–-]*riskfactors/g)].map(m => m.index);
+  const ends = endRe ? [...compact.matchAll(endRe)].map(m => m.index) : [];
 
-  // The contents page repeats these headings. Score each candidate by how
-  // much sentence-like prose follows it and take the best.
+  // The contents page and cross-references ("see Item 4—Business Overview")
+  // repeat these headings. Score each candidate on the prose that actually
+  // follows it, preferring one whose first paragraph names the company.
   let best = null;
   for (const s of starts) {
     const realStart = map[s] !== undefined ? map[s] : text.length;
-    const probe = text.slice(realStart, realStart + 3000);
-    const score = (probe.match(/[.!?]\s/g) || []).length;
+    const probe = text.slice(realStart, realStart + BUSINESS_SECTION_MAX);
+    const paras = probe.split(/\n{2,}/)
+      .map(p => p.replace(/\s+/g, " ").trim())
+      .filter(isBusinessProse);
+    if (!paras.length) continue;
+    let score = paras.length;
+    if (readsLikeDescription(paras[0], companyName)) score += 10;
     if (!best || score > best.score) best = { s, realStart, score };
   }
-  if (!best || best.score < 5) return null; // contents page only
+  if (!best) return null;
 
   const cEnd = ends.find(x => x > best.s);
   const realEnd = (cEnd !== undefined && map[cEnd] !== undefined) ? map[cEnd] : text.length;
@@ -452,55 +485,156 @@ function extractBusinessParagraphs(text) {
     .split(/\n{2,}/)
     .map(p => p.replace(/\s+/g, " ").trim())
     .filter(isBusinessProse);
+  if (!paras.length) return null;
 
-  return paras.length ? paras.slice(0, 2) : null;
+  /* A section often opens with accounting or measurement discussion before it
+     describes the business ("Adjusted income is an alternative measure..."),
+     so prefer to start at the first paragraph that opens the way a company
+     description does - with its own name, or "We ...". */
+  const key = String(companyName || "").split(/[\s,]+/)[0].replace(/[^A-Za-z]/g, "");
+  const VERBS = "is|are|was|seeks?|designs?|develops?|provides?|operates?|manufactures?|" +
+                "sells?|offers?|makes?|helps?|builds?|serves?|produces?|distributes?";
+  const opener = new RegExp(
+    "^(" + (key ? key + "\\b|" : "") + "the company\\s+(" + VERBS + ")\\b|we\\s+(" + VERBS + ")\\b)", "i"
+  );
+  const from = paras.slice(0, 6).findIndex(p => opener.test(p));
+  const start = from > 0 ? from : 0;
+
+  return paras.slice(start, start + 2);
 }
 
-// Newest 10-K among the filings we already fetched for this company.
-function findLatest10K(filingsData) {
+const ITEM1_START = /item1[.:—–-]*business/g;
+const ITEM1_END = /item1a[.:—–-]*riskfactors/g;
+
+function extractBusinessParagraphs(text, companyName) {
+  return extractSectionParagraphs(text, ITEM1_START, ITEM1_END, companyName);
+}
+
+/* Last resort: the best descriptive paragraph anywhere in a document. Held to
+   the same standard as a section paragraph AND required to name the company,
+   because an unqualified "first paragraph" returns cover-page furniture. */
+function firstDescriptiveParagraph(text, companyName) {
+  const paras = text
+    .split(/\n{2,}/)
+    .map(p => p.replace(/\s+/g, " ").trim())
+    .filter(isBusinessProse);
+  const hit = paras.find(p => readsLikeDescription(p, companyName));
+  return hit ? [hit] : null;
+}
+
+// Newest filing of the given form among the filings we already fetched.
+function findLatestForm(filingsData, form) {
   const all = [...(filingsData.key || []), ...(filingsData.recent || [])];
-  return all.find(f => f.form === "10-K") || null;
+  return all.find(f => f.form === form) || null;
 }
 
-/* Returns { paragraphs, filingUrl, filingDate } or null. Never throws:
-   a company with no usable 10-K simply has no description block. */
+// Fetch a filing's primary document as plain text. Returns null on any
+// failure - a description is a nice-to-have, never a reason to fail a page.
+async function fetchFilingText(ticker, filing) {
+  if (!filing || !filing.url) return null;
+  try {
+    const res = await fetch(filing.url, {
+      headers: SEC_HEADERS,
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
+    });
+    if (!res.ok) {
+      console.warn(`[business] ${ticker}: ${filing.form} fetch failed (status ${res.status})`);
+      return null;
+    }
+    const html = await res.text();
+    if (html.length > BUSINESS_DOC_MAX_BYTES) {
+      console.warn(`[business] ${ticker}: ${filing.form} too large (${html.length} bytes)`);
+      return null;
+    }
+    return filingHtmlToText(html);
+  } catch (e) {
+    console.warn(`[business] ${ticker}: ${filing.form} fetch error (${e.message})`);
+    return null;
+  }
+}
+
+/* Resolve a description, in descending order of quality:
+     1. Item 1 (Business) of the latest 10-K
+     2. SEC's own entity description, when populated
+     3. the best descriptive paragraph from a recent 10-K / 10-Q / 8-K
+     4. nothing - the page omits the block
+
+   Returns { paragraphs, sourceLabel, filingUrl, filingDate, form } or null.
+   Never throws. Tier 3 is deliberately held to the same prose standard as a
+   real section: a filing paragraph that does not actually describe the
+   company is worse than no description at all, so it is rejected rather
+   than shown. */
 async function getBusinessDescription(ticker, filingsData) {
   const cached = businessCache[ticker];
   if (cached && Date.now() - cached.at < BUSINESS_CACHE_TTL) {
     return cached.data;
   }
 
+  const companyName = filingsData.name || ticker;
   let result = null;
+
   try {
-    const tenK = findLatest10K(filingsData);
-    if (!tenK || !tenK.url) {
-      console.warn(`[business] ${ticker}: no 10-K in recent filings`);
-    } else {
-      const res = await fetch(tenK.url, {
-        headers: SEC_HEADERS,
-        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
-      });
-      if (!res.ok) {
-        console.warn(`[business] ${ticker}: filing fetch failed (status ${res.status})`);
+    // --- Tier 1: Item 1 of the 10-K -------------------------------------
+    const tenK = findLatestForm(filingsData, "10-K");
+    const tenKText = await fetchFilingText(ticker, tenK);
+    if (tenKText) {
+      const paragraphs = extractBusinessParagraphs(tenKText, companyName);
+      if (paragraphs) {
+        result = {
+          paragraphs,
+          sourceLabel: "Item 1 (Business) of its latest annual report (Form 10-K)",
+          filingUrl: tenK.url,
+          filingDate: tenK.filingDate,
+          form: "10-K"
+        };
       } else {
-        const html = await res.text();
-        if (html.length > BUSINESS_DOC_MAX_BYTES) {
-          console.warn(`[business] ${ticker}: filing too large (${html.length} bytes), skipping`);
-        } else {
-          const paragraphs = extractBusinessParagraphs(filingHtmlToText(html));
-          if (!paragraphs) {
-            console.warn(`[business] ${ticker}: no Item 1 Business prose found`);
-          } else {
-            result = { paragraphs, filingUrl: tenK.url, filingDate: tenK.filingDate };
-          }
-        }
+        console.warn(`[business] ${ticker}: no Item 1 Business prose in 10-K`);
       }
+    } else if (!tenK) {
+      console.warn(`[business] ${ticker}: no 10-K in recent filings`);
+    }
+
+    // --- Tier 2: SEC's own entity description ---------------------------
+    if (!result && filingsData.description && filingsData.description.length > 40) {
+      result = {
+        paragraphs: [filingsData.description],
+        sourceLabel: "the company's SEC entity description",
+        filingUrl: null,
+        filingDate: null,
+        form: null
+      };
+    }
+
+    // --- Tier 3: descriptive prose from any recent primary document -----
+    if (!result) {
+      const candidates = [];
+      if (tenKText) candidates.push({ text: tenKText, filing: tenK });
+      for (const form of ["10-Q", "8-K"]) {
+        const f = findLatestForm(filingsData, form);
+        if (f) candidates.push({ text: null, filing: f });
+      }
+
+      for (const c of candidates) {
+        const text = c.text || await fetchFilingText(ticker, c.filing);
+        if (!text) continue;
+        const paragraphs = firstDescriptiveParagraph(text, companyName);
+        if (!paragraphs) continue;
+        result = {
+          paragraphs,
+          sourceLabel: `its most recent ${c.filing.form} filing`,
+          filingUrl: c.filing.url,
+          filingDate: c.filing.filingDate,
+          form: c.filing.form
+        };
+        break;
+      }
+      if (!result) console.warn(`[business] ${ticker}: no usable description in any recent filing`);
     }
   } catch (e) {
     console.warn(`[business] ${ticker}: extraction failed (${e.message})`);
   }
 
-  // Cache misses too, so a filer we can't parse isn't re-fetched every hit.
+  // Cache misses too, so an unparseable filer is not re-fetched every hit.
   businessCache[ticker] = { at: Date.now(), data: result };
   return result;
 }
@@ -1281,14 +1415,20 @@ app.get("/company/:ticker", async (req, res) => {
     // Description comes from the company's own 10-K, so say so and link the
     // source. If no usable filing section exists, omit the block entirely
     // rather than showing a placeholder that never resolves.
+    // Attribute the description to whatever it actually came from - a
+    // paragraph taken from a 10-Q must not be presented as the annual report.
     let summaryHtml = "";
     if (business) {
+      const dated = business.filingDate ? ` filed with the SEC on ${escapeHtml(business.filingDate)}` : "";
       summaryHtml =
-        `<p class="term-note">In the company's own words, from Item 1 (Business) of its ` +
-        `latest annual report filed with the SEC${business.filingDate ? ` on ${escapeHtml(business.filingDate)}` : ""}.</p>` +
-        paragraphsToHtml(aiSummary) +
-        `<p><a href="${escapeHtml(business.filingUrl)}" target="_blank" rel="noopener">` +
-        `Read the full 10-K on SEC.gov &rarr;</a></p>`;
+        `<p class="term-note">In the company's own words, from ` +
+        `${escapeHtml(business.sourceLabel)}${dated}.</p>` +
+        paragraphsToHtml(aiSummary);
+      if (business.filingUrl) {
+        summaryHtml +=
+          `<p><a href="${escapeHtml(business.filingUrl)}" target="_blank" rel="noopener">` +
+          `Read the full ${escapeHtml(business.form || "filing")} on SEC.gov &rarr;</a></p>`;
+      }
     } else if (aiSummary) {
       summaryHtml = paragraphsToHtml(aiSummary);
     }
