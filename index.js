@@ -251,7 +251,16 @@ function tidyCompanyName(name) {
 /* ===================================================
    PHASE 3: EARNINGS (beat / miss)
    =================================================== */
-async function getEarnings(ticker) {
+/* Last-known-good earnings per ticker. A momentary Finnhub failure used to
+   surface as "earnings temporarily unavailable" and — because the page cache
+   stored the result — stayed that way for the full page TTL. Serving slightly
+   stale figures beats showing nothing: these are quarterly numbers, so a value
+   from a few hours ago is still the current quarter's. */
+const earningsCache = {};
+const EARNINGS_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
+const EARNINGS_RETRY_DELAY_MS = 400;
+
+async function fetchEarningsFromFinnhub(ticker) {
   const apiKey = process.env.FINNHUB_API_KEY;
   if (!apiKey) {
     throw new Error("FINNHUB_API_KEY is not set on the server");
@@ -292,6 +301,44 @@ async function getEarnings(ticker) {
   });
 
   return { latest: quarters[0], history: quarters };
+}
+
+/* Retry once, then fall back to the last known good result for this ticker.
+   Only a genuine failure with nothing cached still throws, so callers keep
+   their existing "unavailable" handling for the truly-no-data case.
+   A null result (company has no analyst estimates) is a valid answer, not a
+   failure, so it is returned as-is and never cached over. */
+async function getEarnings(ticker) {
+  let lastError;
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const data = await fetchEarningsFromFinnhub(ticker);
+      if (data) {
+        earningsCache[ticker] = { at: Date.now(), data };
+      }
+      return data;
+    } catch (e) {
+      lastError = e;
+      if (attempt === 1) {
+        console.warn(`[earnings] ${ticker} attempt 1 failed (${e.message}) — retrying`);
+        await new Promise(r => setTimeout(r, EARNINGS_RETRY_DELAY_MS));
+      }
+    }
+  }
+
+  const cached = earningsCache[ticker];
+  if (cached && Date.now() - cached.at < EARNINGS_CACHE_TTL) {
+    const ageMin = Math.round((Date.now() - cached.at) / 60000);
+    console.warn(
+      `[earnings] ${ticker} both attempts failed (${lastError.message}) — ` +
+      `serving last known good from ${ageMin}m ago`
+    );
+    return cached.data;
+  }
+
+  console.warn(`[earnings] ${ticker} failed with no usable cache: ${lastError.message}`);
+  throw lastError;
 }
 
 /* ===================================================
@@ -1084,7 +1131,13 @@ ${headTagsHtml(title, metaDesc, canonicalUrl)}
 </body>
 </html>`;
 
-    seoPageCache[T] = { at: Date.now(), html: html };
+    // Only cache a healthy render, mirroring reportCache's rule. Caching
+    // unconditionally is what froze a momentary Finnhub failure into
+    // /company/AAPL for the full 6-hour TTL. The page is still served —
+    // it just isn't stored, so the next request can recover.
+    if (!earningsError) {
+      seoPageCache[T] = { at: Date.now(), html: html };
+    }
     res.send(html);
 
   } catch (err) {
