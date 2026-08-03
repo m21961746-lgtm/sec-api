@@ -200,7 +200,10 @@ async function getFilings(cik) {
   const recentList = all.slice(0, 10);
 
   // The single most recent of each "important" type
-  const importantTypes = ["10-K", "10-Q", "8-K"];
+  // 20-F/40-F are the foreign-filer equivalents of the 10-K. Without them a
+  // company like NIO - whose recent filings are all 6-K - never surfaces an
+  // annual report at all.
+  const importantTypes = ["10-K", "20-F", "40-F", "10-Q", "8-K"];
   const keyFilings = [];
   for (const t of importantTypes) {
     const found = all.find(f => f.form === t);
@@ -506,8 +509,18 @@ function extractSectionParagraphs(text, startRe, endRe, companyName) {
 const ITEM1_START = /item1[.:—–-]*business/g;
 const ITEM1_END = /item1a[.:—–-]*riskfactors/g;
 
+/* Foreign private issuers (NIO, XPeng) file a 20-F instead of a 10-K. Its
+   "Item 4. Information on the Company" is the structural equivalent of the
+   10-K's Item 1, and Item 5 is where it ends. */
+const ITEM4_START = /item4[.:—–-]*informationonthecompany/g;
+const ITEM4_END = /item5[.:—–-]*operatingandfinancialreview/g;
+
 function extractBusinessParagraphs(text, companyName) {
   return extractSectionParagraphs(text, ITEM1_START, ITEM1_END, companyName);
+}
+
+function extractForeignBusinessParagraphs(text, companyName) {
+  return extractSectionParagraphs(text, ITEM4_START, ITEM4_END, companyName);
 }
 
 /* Last resort: the best descriptive paragraph anywhere in a document. Held to
@@ -594,6 +607,28 @@ async function getBusinessDescription(ticker, filingsData) {
       console.warn(`[business] ${ticker}: no 10-K in recent filings`);
     }
 
+    // --- Tier 1b: Item 4 of a 20-F / 40-F (foreign private issuers) ------
+    let foreignText = null;
+    let foreign = null;
+    if (!result) {
+      foreign = findLatestForm(filingsData, "20-F") || findLatestForm(filingsData, "40-F");
+      foreignText = await fetchFilingText(ticker, foreign);
+      if (foreignText) {
+        const paragraphs = extractForeignBusinessParagraphs(foreignText, companyName);
+        if (paragraphs) {
+          result = {
+            paragraphs,
+            sourceLabel: `Item 4 (Information on the Company) of its latest annual report (Form ${foreign.form})`,
+            filingUrl: foreign.url,
+            filingDate: foreign.filingDate,
+            form: foreign.form
+          };
+        } else {
+          console.warn(`[business] ${ticker}: no Item 4 prose in ${foreign.form}`);
+        }
+      }
+    }
+
     // --- Tier 2: SEC's own entity description ---------------------------
     if (!result && filingsData.description && filingsData.description.length > 40) {
       result = {
@@ -609,7 +644,8 @@ async function getBusinessDescription(ticker, filingsData) {
     if (!result) {
       const candidates = [];
       if (tenKText) candidates.push({ text: tenKText, filing: tenK });
-      for (const form of ["10-Q", "8-K"]) {
+      if (foreignText) candidates.push({ text: foreignText, filing: foreign });
+      for (const form of ["10-Q", "8-K", "6-K"]) {
         const f = findLatestForm(filingsData, form);
         if (f) candidates.push({ text: null, filing: f });
       }
