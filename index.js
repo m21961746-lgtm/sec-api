@@ -805,16 +805,40 @@ const TICKER_ALIASES = {
   "FI":  "FISV",   // Fiserv renamed; SEC file still lists FISV
 };
 
+/* A holding-company reorganisation can leave the ticker on a brand new
+   registrant that has filed nothing, while the predecessor keeps the entire
+   filing history and loses its ticker. SEC's ticker file then points at an
+   entity that is technically correct and completely useless.
+
+   ExxonMobil did this: XOM maps to CIK 2115436 "ExxonMobil Holdings Corp"
+   (28 filings, no 10-K, one 8-K12B successor registration) while CIK 34088
+   "EXXON MOBIL CORP" holds the 10-K and no longer lists a ticker.
+
+   The give-away is an 8-K12B with no annual report. prewarmAll() warns on
+   that signature so the next reorganisation shows up in the logs rather
+   than as a broken page someone has to notice. */
+const CIK_OVERRIDES = {
+  "XOM": { cik: "0000034088", title: "EXXON MOBIL CORP" }
+};
+
+// Swap in the entity that actually holds the filing history, keeping the
+// ticker itself untouched so URLs and cache keys do not change.
+function applyCikOverride(ticker, entry) {
+  const o = CIK_OVERRIDES[ticker];
+  if (!o) return entry;
+  return { ...entry, cik: o.cik, title: o.title || entry.title };
+}
+
 function resolveTicker(map, T) {
-  if (map[T]) return { ticker: T, entry: map[T] };
+  if (map[T]) return { ticker: T, entry: applyCikOverride(T, map[T]) };
 
   const hyphenated = T.replace(/\./g, "-");
   if (hyphenated !== T && map[hyphenated]) {
-    return { ticker: hyphenated, entry: map[hyphenated] };
+    return { ticker: hyphenated, entry: applyCikOverride(hyphenated, map[hyphenated]) };
   }
 
   const alias = TICKER_ALIASES[T];
-  if (alias && map[alias]) return { ticker: alias, entry: map[alias] };
+  if (alias && map[alias]) return { ticker: alias, entry: applyCikOverride(alias, map[alias]) };
 
   return null;
 }
@@ -2270,8 +2294,21 @@ async function prewarmAll() {
       if (needsFiling && allowFilingFetch) filingBudget--;
 
       try {
-        await buildReport(T, entry, { allowFilingFetch });
+        const payload = await buildReport(T, entry, { allowFilingFetch });
         console.log(`[prewarm] built ${T}${needsFiling && !allowFilingFetch ? " (description deferred)" : ""}`);
+
+        /* A registrant with no annual report at all is the signature of a
+           holdco reorganisation: the ticker moved to a new entity and the
+           filing history stayed behind. Warn so the next one is found here
+           rather than by someone reading a broken page. */
+        const forms = [...(payload.keyFilings || []), ...(payload.filings || [])].map(f => f.form);
+        if (!forms.some(f => f === "10-K" || f === "20-F" || f === "40-F")) {
+          console.warn(
+            `[prewarm] ${T} resolves to CIK ${entry.cik} (${entry.title}) which files ` +
+            `no annual report — likely a holding-company reorganisation; ` +
+            `a CIK_OVERRIDES entry pointing at the predecessor may be needed`
+          );
+        }
       } catch (e) {
         console.log(`[prewarm] failed ${T}: ${e.message}`);
       }
