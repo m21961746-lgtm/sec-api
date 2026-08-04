@@ -566,6 +566,13 @@ async function fetchFilingText(ticker, filing) {
   }
 }
 
+// Is a description already cached and still fresh? Lets the pre-warmer tell
+// "needs a multi-MB filing download" apart from "already have it".
+function hasFreshBusinessCache(ticker) {
+  const c = businessCache[ticker];
+  return !!(c && Date.now() - c.at < BUSINESS_CACHE_TTL);
+}
+
 /* Resolve a description, in descending order of quality:
      1. Item 1 (Business) of the latest 10-K
      2. SEC's own entity description, when populated
@@ -577,10 +584,18 @@ async function fetchFilingText(ticker, filing) {
    real section: a filing paragraph that does not actually describe the
    company is worse than no description at all, so it is rejected rather
    than shown. */
-async function getBusinessDescription(ticker, filingsData) {
+async function getBusinessDescription(ticker, filingsData, opts = {}) {
   const cached = businessCache[ticker];
   if (cached && Date.now() - cached.at < BUSINESS_CACHE_TTL) {
     return cached.data;
+  }
+
+  /* The pre-warmer caps how many multi-MB filings a single sweep downloads.
+     When the budget is spent we return null WITHOUT caching it: a budget
+     skip is not evidence the filer is unparseable, and caching it would
+     poison the 30-day cache with a miss we never actually tested. */
+  if (opts.allowFilingFetch === false) {
+    return null;
   }
 
   const companyName = filingsData.name || ticker;
@@ -837,11 +852,22 @@ function findByName(map, query) {
 const reportCache = {};
 const REPORT_TTL = 6 * 60 * 60 * 1000; // 6 hours
 
+/* A report whose description could not be extracted is still cached, but
+   only briefly. Refusing to cache it at all meant the ~20-30 tickers that
+   fail extraction rebuilt on every prewarm sweep AND every API request,
+   which is the most expensive thing the app did. */
+const DEGRADED_REPORT_TTL = 30 * 60 * 1000; // 30 minutes
+
+function reportCacheFresh(entry) {
+  if (!entry) return false;
+  return Date.now() - entry.at < (entry.ttl || REPORT_TTL);
+}
+
 /* ===================================================
    BUILD A FULL REPORT for one ticker (used by both the
    /resolve endpoint and the pre-warmer)
    =================================================== */
-async function buildReport(T, entry) {
+async function buildReport(T, entry, opts = {}) {
   let filingsData;
   let filingsError = false;
   try {
@@ -855,7 +881,7 @@ async function buildReport(T, entry) {
 
   // Primary source: the company's own 10-K. OpenAI is only consulted if
   // explicitly re-enabled, so a billing problem cannot blank summaries.
-  const business = await getBusinessDescription(T, filingsData);
+  const business = await getBusinessDescription(T, filingsData, opts);
   let aiSummary = business ? business.paragraphs.join("\n\n") : null;
   let aiError = business ? null : "No Item 1 Business section available for this filer";
 
@@ -896,10 +922,13 @@ async function buildReport(T, entry) {
     sec_url: `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${entry.cik}&type=&dateb=&owner=include&count=40`
   };
 
-  // Only cache complete, healthy reports
-  if (aiSummary) {
-    reportCache[T] = { at: Date.now(), data: payload };
-  }
+  // Cache healthy reports for the full TTL and degraded ones briefly, so a
+  // ticker we cannot describe still stops being rebuilt on every request.
+  reportCache[T] = {
+    at: Date.now(),
+    data: payload,
+    ttl: aiSummary ? REPORT_TTL : DEGRADED_REPORT_TTL
+  };
 
   return payload;
 }
@@ -991,7 +1020,7 @@ app.get("/resolve", resolveRateLimit, async (req, res) => {
 
     // Serve from cache if we built this report recently
     const cached = reportCache[T];
-    if (cached && Date.now() - cached.at < REPORT_TTL) {
+    if (reportCacheFresh(cached)) {
       return res.json(cached.data);
     }
 
@@ -1035,7 +1064,7 @@ app.get("/api/v1/company/:ticker", resolveRateLimit, async (req, res) => {
     const entry = resolved.entry;
 
     const cached = reportCache[canonical];
-    const payload = (cached && Date.now() - cached.at < REPORT_TTL)
+    const payload = reportCacheFresh(cached)
       ? cached.data
       : await buildReport(canonical, entry);
 
@@ -1765,7 +1794,7 @@ app.get("/developers", async (req, res) => {
     const map = await loadTickerMap();
     const entry = map["AAPL"];
     const cached = reportCache["AAPL"];
-    const payload = (cached && Date.now() - cached.at < REPORT_TTL)
+    const payload = reportCacheFresh(cached)
       ? cached.data
       : await buildReport("AAPL", entry);
     const api = buildApiV1Payload(payload);
@@ -2193,12 +2222,25 @@ ${urls}
    Skips any report that is still fresh in the cache.
    =================================================== */
 const PREWARM_SPACING = 3000; // 3 seconds between builds
+
+/* Multi-MB annual reports downloaded per sweep. A cold start needs all 198
+   (~870MB at a measured 4.4MB average); this spreads that over ~8 sweeps
+   rather than pulling it in one burst. */
+const PREWARM_FILING_BUDGET = 25;
+
+/* Deliberately not REPORT_TTL. When the two were equal every entry expired
+   exactly as the sweep began, so all 198 rebuilt every time - about 190MB
+   of SEC submissions JSON per sweep. Filings are annual and earnings
+   quarterly, so 6-hour freshness bought nothing. */
+const PREWARM_INTERVAL = 12 * 60 * 60 * 1000; // 12 hours
 let prewarmRunning = false;
 
 async function prewarmAll() {
   if (prewarmRunning) return; // never run two sweeps at once
   prewarmRunning = true;
   console.log(`[prewarm] starting sweep of ${SEO_TICKERS.length} companies`);
+
+  let filingBudget = PREWARM_FILING_BUDGET;
 
   try {
     const map = await loadTickerMap();
@@ -2216,11 +2258,20 @@ async function prewarmAll() {
 
       // still fresh? skip it
       const cached = reportCache[T];
-      if (cached && Date.now() - cached.at < REPORT_TTL) continue;
+      if (reportCacheFresh(cached)) continue;
+
+      /* Cap multi-MB filing downloads per sweep. On a cold start all 198
+         descriptions are missing, which would pull ~870MB in one burst;
+         this spreads it over successive sweeps instead. Companies past the
+         budget still get a report, just without a description yet, and are
+         picked up by a later sweep or by the first visitor. */
+      const needsFiling = !hasFreshBusinessCache(T);
+      const allowFilingFetch = !needsFiling || filingBudget > 0;
+      if (needsFiling && allowFilingFetch) filingBudget--;
 
       try {
-        await buildReport(T, entry);
-        console.log(`[prewarm] built ${T}`);
+        await buildReport(T, entry, { allowFilingFetch });
+        console.log(`[prewarm] built ${T}${needsFiling && !allowFilingFetch ? " (description deferred)" : ""}`);
       } catch (e) {
         console.log(`[prewarm] failed ${T}: ${e.message}`);
       }
@@ -2239,7 +2290,7 @@ async function prewarmAll() {
 
 // run shortly after server start, then every 6 hours
 setTimeout(prewarmAll, 10 * 1000);          // first sweep, 10s after boot
-setInterval(prewarmAll, REPORT_TTL);        // repeat sweeps every 6 hours
+setInterval(prewarmAll, PREWARM_INTERVAL);  // repeat sweeps every 12 hours
 
 /* =========================
    START SERVER
