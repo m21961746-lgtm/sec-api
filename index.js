@@ -1280,8 +1280,19 @@ const PAGE_STYLE = `
   .feedback-status{font-size:.75rem;min-height:14px;margin:0;color:#888;}
   .feedback-status.success{color:#2f8f5b;}
   .feedback-status.error{color:#9c4b4b;}
+  .idx-jump{margin:18px 0 8px;font-size:.9rem;line-height:2;}
+  .idx-jump a{display:inline-block;min-width:24px;text-align:center;padding:2px 6px;
        margin-right:2px;border:1px solid #eee;border-radius:6px;text-decoration:none;}
+  .idx-jump a:hover{background:#f7f6f9;}
+  .idx-list{list-style:none;padding:0;margin:6px 0 22px;
        columns:2;column-gap:28px;}
+  .idx-list li{break-inside:avoid;padding:5px 0;}
+  .idx-list a{text-decoration:none;}
+  .idx-list a:hover{text-decoration:underline;}
+  .idx-ticker{color:#888;font-size:.8rem;}
+  .idx-count{color:#888;font-size:.85rem;margin-top:0;}
+  .browse-all{margin:14px 0 0;font-size:.9rem;}
+  @media (max-width:560px){ .idx-list{columns:1;} }
   a{color:#0b5;}
 `;
 
@@ -1493,8 +1504,9 @@ ${headTagsHtml(title, metaDesc, canonicalUrl)}
   <h2>SEC Filings</h2>
   ${filingsHtml}
   <a href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${entry.cik}&type=&dateb=&owner=include&count=40" target="_blank" rel="noopener">View all filings on SEC.gov &rarr;</a>
+  <p class="browse-all"><a href="/companies">Browse all companies A&ndash;Z &rarr;</a></p>
   <a class="cta" href="/">Look up any company on Zelothorn &rarr;</a>
-  <p class="disc">Zelothorn provides AI-generated explanations and official public data for
+  <p class="disc">Zelothorn provides plain-English summaries drawn from official SEC filings for
   educational purposes only. It is not financial advice and does not recommend buying or
   selling any security.</p>
   ${feedbackFormHtml(T)}
@@ -2041,6 +2053,115 @@ const SEO_TICKERS = [
   "GME","AMC","BBBY","SMCI","CLOV","TLRY","CGC","DKNG","PENN","WYNN"
 ];
 
+/* ===================================================
+   COMPANY INDEX  (/companies)
+   A crawlable hub linking to every company page.
+
+   Without this the company pages are orphans: the homepage
+   renders its results with JavaScript and never emits an
+   anchor, so sitemap.xml was Google's only route to them —
+   which is what "Discovered, currently not indexed" means.
+   Every company page also links back here, so the set is
+   reachable in one hop from anywhere on the site.
+   =================================================== */
+const companiesPageCache = { at: 0, html: null };
+const COMPANIES_PAGE_TTL = 6 * 60 * 60 * 1000; // 6 hours
+
+app.get("/companies", async (req, res) => {
+  const cached = companiesPageCache;
+  if (cached.html && Date.now() - cached.at < COMPANIES_PAGE_TTL) {
+    return res.send(cached.html);
+  }
+
+  const title = "All Companies A-Z | Zelothorn";
+  const metaDesc =
+    "Browse plain-English explanations of what public companies do, how they " +
+    "make money, and their latest SEC filings and earnings.";
+  const canonicalUrl = "https://zelothorn.com/companies";
+
+  try {
+    const map = await loadTickerMap();
+
+    // Resolve through the same path the company pages use, so a ticker that
+    // 404s there can never be listed here as a working link.
+    const entries = [];
+    for (const rawTicker of SEO_TICKERS) {
+      const T = rawTicker.toUpperCase();
+      const resolved = resolveTicker(map, T);
+      if (!resolved) {
+        console.warn(`[companies] ticker not in SEC list, skipping: ${T}`);
+        continue;
+      }
+      entries.push({
+        ticker: resolved.ticker,
+        name: NAME_OVERRIDES[resolved.ticker] || tidyCompanyName(resolved.entry.title)
+      });
+    }
+
+    entries.sort((a, b) => a.name.localeCompare(b.name));
+
+    // Group by the display name's first character; anything not A-Z
+    // (a numeral, say) collects under "#".
+    const groups = new Map();
+    for (const e of entries) {
+      const first = (e.name.charAt(0) || "").toUpperCase();
+      const key = /[A-Z]/.test(first) ? first : "#";
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(e);
+    }
+    const letters = [...groups.keys()].sort();
+    const anchorId = (L) => (L === "#" ? "num" : L);
+
+    const jumpHtml = letters
+      .map(L => `<a href="#letter-${anchorId(L)}">${escapeHtml(L)}</a>`)
+      .join("");
+
+    const listHtml = letters.map(L => {
+      const items = groups.get(L).map(e =>
+        `<li><a href="/company/${encodeURIComponent(e.ticker)}">` +
+        `${escapeHtml(e.name)} <span class="idx-ticker">${escapeHtml(e.ticker)}</span>` +
+        `</a></li>`
+      ).join("");
+      return `<h2 id="letter-${anchorId(L)}">${escapeHtml(L)}</h2>` +
+             `<ul class="idx-list">${items}</ul>`;
+    }).join("\n  ");
+
+    const html =
+`<!DOCTYPE html>
+<html lang="en">
+<head>
+${headTagsHtml(title, metaDesc, canonicalUrl)}
+<style>${PAGE_STYLE}</style>
+</head>
+<body>
+  <h1>All companies</h1>
+  <p class="sub">Plain-English explainers for ${entries.length} public companies</p>
+  <p class="idx-count">Each page covers what the business does, how it makes money,
+  its latest earnings versus estimates, and its official SEC filings.</p>
+  <nav class="idx-jump">${jumpHtml}</nav>
+  ${listHtml}
+  <a class="cta" href="/">Look up any company on Zelothorn &rarr;</a>
+  <p class="disc">Zelothorn provides plain-English summaries drawn from official SEC filings for
+  educational purposes only. It is not financial advice and does not recommend buying or
+  selling any security.</p>
+</body>
+</html>`;
+
+    companiesPageCache.at = Date.now();
+    companiesPageCache.html = html;
+    res.send(html);
+
+  } catch (err) {
+    res.status(500).send(
+      `<!DOCTYPE html><html><head><meta charset="utf-8">` +
+      `<title>Zelothorn</title></head><body>` +
+      `<h1>Something went wrong</h1>` +
+      `<p>Please try again in a moment, or look up a company on <a href="/">Zelothorn</a>.</p>` +
+      `</body></html>`
+    );
+  }
+});
+
 app.get("/sitemap.xml", async (req, res) => {
   const base = "https://zelothorn.com";
   const urls = SEO_TICKERS.map(t =>
@@ -2055,6 +2176,7 @@ app.get("/sitemap.xml", async (req, res) => {
   <url><loc>${base}/learn/what-is-a-10-q</loc></url>
   <url><loc>${base}/learn/what-is-an-8-k</loc></url>
   <url><loc>${base}/developers</loc></url>
+  <url><loc>${base}/companies</loc></url>
 ${urls}
 </urlset>`;
 

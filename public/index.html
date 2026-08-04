@@ -230,6 +230,19 @@
       color: var(--accent-ink);
       margin: 0;
     }
+    /* Real anchor, rendered server-side: the search results are built in
+       JavaScript, so this is the only crawlable path from the homepage
+       into the company pages. */
+    .intro-browse {
+      font-size: 13.5px;
+      margin: 10px 0 0;
+    }
+    .intro-browse a {
+      color: var(--accent-ink);
+      text-decoration: none;
+      border-bottom: 1px solid var(--line);
+    }
+    .intro-browse a:hover { border-bottom-color: var(--accent-ink); }
 
     .status {
       text-align: center;
@@ -497,6 +510,7 @@
       <h2 class="intro-heading">New here? Zelothorn explains public companies in plain language — no finance degree required.</h2>
       <p class="intro-text">Type any company name or ticker above to see what it does, what a stock is, how its latest earnings compared to expectations, and its official SEC filings — each explained simply.</p>
       <p class="intro-brand">We explain what's already public. No ratings, no price targets, no buy or sell advice — ever.</p>
+      <p class="intro-browse"><a href="/companies">Browse all companies A&ndash;Z &rarr;</a></p>
     </div>
 
     <div class="quick">
@@ -536,7 +550,7 @@
       </div>
 
       <p class="disclaimer">
-        Zelothorn provides AI-generated explanations and official data for educational
+        Zelothorn provides plain-English summaries drawn from official SEC filings, for educational
         purposes only. It does not provide financial advice and does not tell you what to buy or sell.
       </p>
     </div>
