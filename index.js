@@ -163,18 +163,50 @@ async function loadTickerMap() {
 /* ===================================================
    FETCH SEC FILINGS (Phase 2)
    =================================================== */
-async function getFilings(cik) {
-  const url = `https://data.sec.gov/submissions/CIK${cik}.json`;
-  const res = await fetch(url, {
-    headers: SEC_HEADERS,
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
-  });
+/* Processed submissions per CIK. The pre-warm sweep runs every 12 hours and
+   re-read this file for all 198 companies each time - roughly 18MB on the
+   wire and 155MB of JSON to gunzip and parse. The TTL is 24 hours rather
+   than 12 deliberately: at 12 every entry would expire exactly as the next
+   sweep began and save nothing, the same trap REPORT_TTL fell into when it
+   matched the old sweep interval. At 24 alternate sweeps are free.
 
-  if (!res.ok) {
-    throw new Error(`SEC filings request failed (status ${res.status})`);
+   Keyed by CIK, not ticker, because that is what getFilings() receives and
+   BRK-A/BRK-B share one. The processed result is stored, not the raw JSON,
+   so a hit skips the parse as well as the fetch.
+
+   data.sec.gov sends no ETag, Last-Modified or Cache-Control, so
+   conditional revalidation is not available - a TTL is the only option. */
+const SUBMISSIONS_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
+const submissionsCache = {};
+
+async function getFilings(cik) {
+  const cached = submissionsCache[cik];
+  if (cached && Date.now() - cached.at < SUBMISSIONS_CACHE_TTL) {
+    return cached.data;
   }
 
-  const data = await res.json();
+  const url = `https://data.sec.gov/submissions/CIK${cik}.json`;
+  let data;
+  try {
+    const res = await fetch(url, {
+      headers: SEC_HEADERS,
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
+    });
+    if (!res.ok) {
+      throw new Error(`SEC filings request failed (status ${res.status})`);
+    }
+    data = await res.json();
+  } catch (e) {
+    /* A failure is never written to the cache - that is the earnings bug,
+       where a momentary outage was frozen in for the full TTL. Serve the
+       last good copy if we have one, otherwise let the caller handle it. */
+    if (cached) {
+      const ageH = ((Date.now() - cached.at) / 3600000).toFixed(1);
+      console.warn(`[filings] CIK ${cik} fetch failed (${e.message}) — serving cached copy from ${ageH}h ago`);
+      return cached.data;
+    }
+    throw e;
+  }
   const recent = data.filings.recent;
   const cikInt = parseInt(cik, 10);
 
@@ -210,7 +242,7 @@ async function getFilings(cik) {
     if (found) keyFilings.push(found);
   }
 
-  return {
+  const result = {
     recent: recentList,
     key: keyFilings,
     name: data.name || null,
@@ -218,6 +250,12 @@ async function getFilings(cik) {
     // it is empty for most registrants, so it rarely fires.
     description: (data.description || "").trim() || null
   };
+
+  /* Cached even when the entity has no filings at all. That is a real
+     answer, not a failure, and caching it stops known-empty registrants
+     being refetched on every sweep. */
+  submissionsCache[cik] = { at: Date.now(), data: result };
+  return result;
 }
 
 /* ===================================================
